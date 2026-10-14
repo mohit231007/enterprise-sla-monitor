@@ -4,12 +4,13 @@ import express from "express";
 import { z } from "zod";
 import { getBranchMetrics, getDateRange, interventionFor, prisma } from "./dashboard.js";
 import { appendDemoEvent } from "./demo-stream.js";
+import { ingestCsv, uploadSchema, ValidationError } from "./csv-ingest.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? 4000);
 
 app.use(cors({ origin: process.env.CORS_ORIGIN?.split(",") ?? "http://localhost:3000" }));
-app.use(express.json());
+app.use(express.json({limit:"600kb"}));
 
 const querySchema = z.object({ from: z.string().optional(), to: z.string().optional() });
 const formatRange = (from: Date, to: Date) => ({ from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) });
@@ -46,6 +47,25 @@ app.post("/api/dashboard/demo/tick", async (_request, response, next) => {
   } catch (error) { next(error); }
 });
 
+app.post("/api/dashboard/upload", async (request,response,next) => {
+  try {
+    // This key is provisioned server-side. Never expose it as NEXT_PUBLIC_*.
+    const expected=process.env.BANKER_UPLOAD_KEY;
+    const supplied=request.header("x-banker-upload-key") ?? "";
+    const { timingSafeEqual }=await import("node:crypto");
+    if(!expected || !supplied || Buffer.byteLength(expected)!==Buffer.byteLength(supplied) ||
+       !timingSafeEqual(Buffer.from(expected),Buffer.from(supplied))) {
+       response.status(401).json({error:"Banker upload authorization required."});return;
+    }
+    const input=uploadSchema.parse(request.body);
+    const result=await ingestCsv(prisma,input);
+    response.status(201).json(result);
+  }catch(error){
+    if(error instanceof ValidationError){response.status(422).json({error:error.message,details:error.details});return;}
+    if(error instanceof z.ZodError){response.status(422).json({error:"Invalid upload payload",details:error.issues.map(i=>i.path.join(".")+": "+i.message)});return;}
+    next(error);
+  }
+});
 app.get("/api/dashboard/query-catalog", (_request, response) => response.json({
   queries: [{
     name: "Branch performance and SLA rollup",

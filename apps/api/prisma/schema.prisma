@@ -88,3 +88,15 @@ model IngestionRun {
   @@index([startedAt])
   @@map("ingestion_runs")
 }
+
+model ReportSnapshot {
+  id String @id
+  createdAt DateTime @default(now()) @map("created_at")
+  dateFrom DateTime @db.Date @map("date_from")
+  dateTo DateTime @db.Date @map("date_to")
+  ingestionRunIds Json @map("ingestion_run_ids")
+  payload Json
+  contentSha256 String @map("content_sha256")
+  @@index([createdAt])
+  @@map("report_snapshots")
+}

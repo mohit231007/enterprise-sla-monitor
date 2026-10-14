@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getBranchMetrics, getDateRange, interventionFor, prisma } from "./dashboard.js";
 import { appendDemoEvent } from "./demo-stream.js";
 import { ingestCsv, uploadSchema, ValidationError } from "./csv-ingest.js";
+import { createReport, executeCatalogQuery, sqlCatalog } from "./reporting.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? 4000);
@@ -76,6 +77,32 @@ app.post("/api/dashboard/upload", async (request,response,next) => {
     next(error);
   }
 });
+
+app.get("/api/dashboard/sql-catalog", (_request,response)=>response.json({queries:sqlCatalog}));
+app.get("/api/dashboard/sql-results",async(request,response,next)=>{
+ try{
+  const parsed=z.object({id:z.enum(["branch-performance","regional-ranking","daily-ticket-trend"]),from:z.string().regex(/^\d{4}-\d{2}-\d{2}$/),to:z.string().regex(/^\d{4}-\d{2}-\d{2}$/)}).parse(request.query);
+  response.json({rows:await executeCatalogQuery(prisma,parsed.id,parsed.from,parsed.to)});
+ }catch(e){next(e);}
+});
+app.get("/api/dashboard/ingestion-history",async(_request,response,next)=>{
+ try{const runs=await prisma.ingestionRun.findMany({orderBy:{startedAt:"desc"},take:100});response.json({runs});}
+ catch(e){next(e);}
+});
+app.post("/api/dashboard/reports",async(request,response,next)=>{
+ try{
+  const input=z.object({from:z.string().regex(/^\d{4}-\d{2}-\d{2}$/),to:z.string().regex(/^\d{4}-\d{2}-\d{2}$/)}).parse(request.body);
+  response.status(201).json(await createReport(prisma,input.from,input.to));
+ }catch(e){next(e);}
+});
+app.get("/api/dashboard/reports/:id",async(request,response,next)=>{
+ try{
+  const report=await prisma.reportSnapshot.findUnique({where:{id:request.params.id}});
+  if(!report){response.status(404).json({error:"Report not found"});return;}
+  response.json({id:report.id,createdAt:report.createdAt,contentSha256:report.contentSha256,payload:report.payload});
+ }catch(e){next(e);}
+});
+
 app.get("/api/dashboard/query-catalog", (_request, response) => response.json({
   queries: [{
     name: "Branch performance and SLA rollup",

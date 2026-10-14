@@ -9,7 +9,7 @@ import { PerformanceChart, TrendChart } from "./Charts";
 import { InterventionTable } from "./InterventionTable";
 import { KpiCard } from "./KpiCard";
 import { LiveDataPanel } from "./LiveDataPanel";
-import { SqlExplorer } from "./SqlExplorer";
+import { ReportingWorkspace } from "./ReportingWorkspace";
 import { CsvUploadPanel } from "./CsvUploadPanel";
 
 const isoDate = (date: Date) => date.toISOString().slice(0, 10);
@@ -24,6 +24,7 @@ export function Dashboard() {
   const [dataStatus, setDataStatus] = useState<DataStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reportRefresh,setReportRefresh] = useState(0);
   const [pendingRange,setPendingRange] = useState<{dateFrom:string;dateTo:string}|null>(null);
 
   const load = useCallback(async () => {
@@ -53,11 +54,11 @@ export function Dashboard() {
     {error ? <ErrorState error={error} onRetry={() => void load()} /> : loading && !data ? <LoadingSkeleton /> : data ? <>
       <LiveDataPanel status={dataStatus} busy={loading} onSimulate={() => void simulate()} />
       <CsvUploadPanel onUploaded={(range)=>setPendingRange(range)} />
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3"><p className="text-sm text-slate-600">{pendingRange?"New data committed. Select GENERATE REPORT to view the imported period.":"Generate a fresh SQL-backed report for the selected date range."}</p><button onClick={()=>{if(pendingRange){setFrom(pendingRange.dateFrom);setTo(pendingRange.dateTo);setPendingRange(null);if(from===pendingRange.dateFrom&&to===pendingRange.dateTo)void load();}else void load();}} disabled={loading} className="rounded-lg bg-emerald-700 px-5 py-2.5 text-sm font-bold tracking-wide text-white disabled:opacity-50">GENERATE REPORT</button></div>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3"><p className="text-sm text-slate-600">{pendingRange?"New data committed. Select GENERATE REPORT to view the imported period.":"Generate a fresh SQL-backed report for the selected date range."}</p><button onClick={()=>{setReportRefresh(x=>x+1);if(pendingRange){setFrom(pendingRange.dateFrom);setTo(pendingRange.dateTo);setPendingRange(null);if(from===pendingRange.dateFrom&&to===pendingRange.dateTo)void load();}else void load();}} disabled={loading} className="rounded-lg bg-emerald-700 px-5 py-2.5 text-sm font-bold tracking-wide text-white disabled:opacity-50">GENERATE REPORT</button></div>
       <section className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><KpiCard label="Total revenue" value={inr.format(data.summary.totalRevenue)} detail={`${data.summary.slaBreachRate.toFixed(1)}% portfolio breach rate`} icon={CircleDollarSign} tone="blue" trend="up" /><KpiCard label="Avg. turnaround time" value={`${data.summary.avgTatHours.toFixed(1)} hrs`} detail="Across all closed tickets" icon={Clock3} tone="green" trend="down" /><KpiCard label="Active SLA breaches" value={String(data.summary.activeSlaBreaches)} detail={`${data.summary.totalPendingCases} pending cases in total`} icon={ShieldAlert} tone="red" /><KpiCard label="Open complaints" value={String(data.summary.openComplaints)} detail="Needs frontline resolution" icon={UsersRound} tone="amber" /></section>
       <section className="mb-6 grid gap-6 xl:grid-cols-2"><PerformanceChart branches={data.branches} /><TrendChart trends={data.trends} /></section>
       <section className="mb-6 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-white px-5 py-4"><p className="text-sm font-semibold text-blue-950">Management focus</p><p className="mt-1 text-sm text-slate-600">{data.interventions.length ? `${data.interventions.filter((item) => item.status === "Critical").length} critical and ${data.interventions.filter((item) => item.status === "Warning").length} warning branch interventions require a named owner and next review date.` : "The branch portfolio is operating within the current intervention thresholds."}</p></section>
-      <SqlExplorer /><BranchHealthTable branches={data.branches} /><InterventionTable interventions={data.interventions} />
+      <ReportingWorkspace from={from} to={to} reportRefresh={reportRefresh}/><BranchHealthTable branches={data.branches} /><InterventionTable interventions={data.interventions} />
       <p className="mt-4 text-center text-xs text-slate-400">Showing {data.summary.dateRange.from} to {data.summary.dateRange.to} · Intervention thresholds: &gt;10% SLA breaches or &gt;15 open complaints</p>
     </> : null}
   </div></main>;

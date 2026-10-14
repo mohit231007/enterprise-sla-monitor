@@ -25,3 +25,14 @@ export async function appendDemoEvent() {
   if (!response.ok) throw new Error(`Could not ingest demo event (${response.status})`);
   return response.json() as Promise<{ message: string }>;
 }
+
+export async function uploadCsv(payload:{
+  dataset:"performance"|"tickets";filename:string;columns:string[];rows:Record<string,string>[]
+},key:string):Promise<{runId:number;accepted:number;dateFrom:string;dateTo:string}>{
+ const response=await fetch(`${API_URL}/api/dashboard/upload`,{
+   method:"POST",headers:{"Content-Type":"application/json","x-banker-upload-key":key},body:JSON.stringify(payload)
+ });
+ const data=await response.json().catch(()=>({}));
+ if(!response.ok)throw new Error([data.error,...(data.details??[]).slice(0,5)].filter(Boolean).join(" | ")||`Upload failed (${response.status})`);
+ return data;
+}

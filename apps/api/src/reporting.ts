@@ -81,7 +81,7 @@ export async function createReport(db:PrismaClient,from:string,to:string){
   createdAt:{gte:range.from,lte:range.to},status:"Closed",resolvedAt:{not:null}
  },select:{createdAt:true,resolvedAt:true}});
  const counts=metrics.reduce((a,b)=>({tickets:a.tickets+b.ticketCount,breaches:a.breaches+b.slaBreaches}),{tickets:0,breaches:0});
- const runs=await db.ingestionRun.findMany({where:{status:"SUCCESS",completedAt:{lte:new Date()}},select:{id:true},orderBy:{id:"asc"}});
+ const runs=await db.ingestionRun.findMany({where:{status:"SUCCESS",latestEventAt:{gte:range.from,lte:range.to}},select:{id:true},orderBy:{id:"asc"}});
  const payload={
    period:{from:from,to:to},
    summary:{

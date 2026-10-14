@@ -8,6 +8,14 @@ import { ingestCsv, uploadSchema, ValidationError } from "./csv-ingest.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? 4000);
+const uploadAttempts = new Map<string,{count:number;reset:number}>();
+function allowUpload(ip:string):boolean{
+ const now=Date.now();const old=uploadAttempts.get(ip);
+ const next=!old||old.reset<now?{count:1,reset:now+60_000}:{count:old.count+1,reset:old.reset};
+ uploadAttempts.set(ip,next);
+ if(uploadAttempts.size>5000)for(const [key,value] of uploadAttempts)if(value.reset<now)uploadAttempts.delete(key);
+ return next.count<=10;
+}
 
 app.use(cors({ origin: process.env.CORS_ORIGIN?.split(",") ?? "http://localhost:3000" }));
 app.use(express.json({limit:"600kb"}));
@@ -49,6 +57,7 @@ app.post("/api/dashboard/demo/tick", async (_request, response, next) => {
 
 app.post("/api/dashboard/upload", async (request,response,next) => {
   try {
+    if(!allowUpload(request.ip??"unknown")){response.status(429).json({error:"Upload rate limit exceeded."});return;}
     // This key is provisioned server-side. Never expose it as NEXT_PUBLIC_*.
     const expected=process.env.BANKER_UPLOAD_KEY;
     const supplied=request.header("x-banker-upload-key") ?? "";
@@ -58,6 +67,7 @@ app.post("/api/dashboard/upload", async (request,response,next) => {
        response.status(401).json({error:"Banker upload authorization required."});return;
     }
     const input=uploadSchema.parse(request.body);
+    if(!input.filename.toLowerCase().endsWith(".csv")){response.status(422).json({error:"Only CSV files are allowed."});return;}
     const result=await ingestCsv(prisma,input);
     response.status(201).json(result);
   }catch(error){

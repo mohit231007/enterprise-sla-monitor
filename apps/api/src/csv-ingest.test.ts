@@ -19,6 +19,19 @@ describe("PostgreSQL upload-to-report integration",()=>{
    expect(rows[0].revenue).toBe(950000);
    expect(await db.ingestionRun.count({where:{source:"CSV_UPLOAD",status:"SUCCESS",id:{in:[first.runId,second.runId]}}})).toBe(2);
  });
+ it("imports all 150 performance records in one atomic batch",async()=>{
+   const names=["Connaught Place","Banjara Hills","Bandra West","Salt Lake","Indiranagar"];
+   const rows=names.flatMap(branch_name=>Array.from({length:30},(_,i)=>({
+     branch_name,date:"2026-08-"+String(i+1).padStart(2,"0"),
+     revenue:"950000",revenue_target:"900000",accounts_opened:"35",loans_processed:"14"
+   })));
+   const result=await ingestCsv(db,uploadSchema.parse({dataset:"performance",filename:"bulk.csv",columns,rows}));
+   expect(result.accepted).toBe(150);
+   expect(result.dateFrom).toBe("2026-08-01");
+   expect(result.dateTo).toBe("2026-08-30");
+   const stored=await db.dailyPerformance.count({where:{date:{gte:new Date("2026-08-01T00:00:00Z"),lte:new Date("2026-08-30T00:00:00Z")}}});
+   expect(stored).toBe(150);
+ });
  it("rejects bad numeric values, writes no performance, and audits the failure",async()=>{
    const record=data("2026-10-15","");
    const before=await db.ingestionRun.count({where:{source:"CSV_UPLOAD",status:"FAILED"}});

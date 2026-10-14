@@ -4,6 +4,12 @@ A full-stack operational dashboard for monitoring branch revenue, turnaround tim
 
 This is deliberately built as an MVP product, not a chart-only mock-up: the dashboard exposes a documented intervention policy, separates commercial and operational health, has loading/error experiences, and ships with automated policy tests and CI.
 
+## Live-simulated SQL demo
+
+The application is intentionally transparent: it does **not** claim to use real bank or customer data. The `Simulate an event` control writes a new synthetic ticket and updates the database in a transaction; the dashboard reloads from SQL-backed rollups and records the execution in an ingestion audit table. The page clearly displays `SIMULATED LIVE` and data freshness.
+
+The core portfolio query uses SQL common table expressions (CTEs), not frontend arithmetic. See [SQL analytics design](docs/SQL_ANALYTICS.md).
+
 ## Stack
 
 - **Web:** Next.js 15, React, Tailwind CSS, Recharts, Lucide React
@@ -62,6 +68,7 @@ flowchart TB
 ## What makes it portfolio-ready
 
 - 5 branches, 150 daily performance records, and realistic operational tickets created deterministically over 30 days.
+- Auditable ingestion runs and a live-simulation endpoint that demonstrates a real database write → SQL rollup → dashboard refresh path.
 - Date-filtered executive KPIs, comparison charts, complete branch health portfolio, and a concise action matrix.
 - Pure, unit-tested intervention policy so business thresholds are not hidden inside UI components or raw SQL.
 - Typed API boundary, parameter validation, CORS configuration, health check, clean loading state, retry path, and error state.

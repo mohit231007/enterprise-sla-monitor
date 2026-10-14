@@ -42,10 +42,10 @@ export async function getBranchMetrics(range: DateRange) {
         COUNT(*) AS ticket_count,
         SUM(CASE WHEN status = 'Open' THEN 1 ELSE 0 END) AS pending_cases,
         SUM(CASE WHEN status = 'Open' AND type = 'Complaint' THEN 1 ELSE 0 END) AS open_complaints,
-        SUM(CASE WHEN sla_breached = 1 THEN 1 ELSE 0 END) AS sla_breaches,
-        SUM(CASE WHEN status = 'Open' AND sla_breached = 1 THEN 1 ELSE 0 END) AS active_sla_breaches,
+        SUM(CASE WHEN sla_breached = true THEN 1 ELSE 0 END) AS sla_breaches,
+        SUM(CASE WHEN status = 'Open' AND sla_breached = true THEN 1 ELSE 0 END) AS active_sla_breaches,
         AVG(CASE WHEN status = 'Closed' AND resolved_at IS NOT NULL
-          THEN (julianday(resolved_at) - julianday(created_at)) * 24 END) AS avg_tat_hours
+          THEN EXTRACT(EPOCH FROM (resolved_at - created_at)) / 3600.0 END) AS avg_tat_hours
       FROM operations_tickets
       WHERE created_at >= ${range.from} AND created_at <= ${range.to}
       GROUP BY branch_id

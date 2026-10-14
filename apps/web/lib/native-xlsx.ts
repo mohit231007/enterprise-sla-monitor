@@ -44,7 +44,7 @@ export function generateXlsx(sheets:Sheet[]):Uint8Array{
  if(!sheets.length)throw Error("At least one worksheet is required");
  const used=new Set<string>();
  const list=sheets.map((sheet,i)=>{
-  const cleaned=sheet.name.replace(/[\\\\/*?:\\[\\]]/g," ").replace(/[\\u0000-\\u001f]/g,"").replace(/^'+|'+$/g,"").trim()||"Sheet "+(i+1);
+  const cleaned=sheet.name.replace(/[\\/*?:\[\]]/g," ").replace(/[\u0000-\u001f]/g,"").replace(/^'+|'+$/g,"").trim()||"Sheet "+(i+1);
   let name=cleaned.slice(0,31);
   for(let suffix=2;used.has(name.toLowerCase());suffix++){
     const extra=" ("+suffix+")";

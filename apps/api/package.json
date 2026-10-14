@@ -1,0 +1,32 @@
+{
+  "name": "@branch360/api",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --import tsx ../../node_modules/tsx/dist/cli.mjs watch src/server.ts",
+    "build": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "db:generate": "node ../../node_modules/prisma/build/index.js generate",
+    "db:push": "node ../../node_modules/prisma/build/index.js db push",
+    "db:seed": "npm run db:push && node --import tsx prisma/seed.ts",
+    "test": "node ../../node_modules/vitest/vitest.mjs run"
+  },
+  "prisma": { "seed": "tsx prisma/seed.ts" },
+  "dependencies": {
+    "@prisma/client": "^6.4.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.5",
+    "prisma": "^6.4.1",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.7"
+  }
+}

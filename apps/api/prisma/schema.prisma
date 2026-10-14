@@ -1,0 +1,60 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Branch {
+  id           Int                @id @default(autoincrement())
+  name         String             @unique
+  region       String
+  managerName  String             @map("manager_name")
+  performance  DailyPerformance[]
+  tickets      OperationsTicket[]
+
+  @@map("branches")
+}
+
+model DailyPerformance {
+  id             Int      @id @default(autoincrement())
+  branchId       Int      @map("branch_id")
+  date           DateTime
+  revenue        Float
+  revenueTarget  Float    @map("revenue_target")
+  accountsOpened Int      @map("accounts_opened")
+  loansProcessed Int      @map("loans_processed")
+  branch         Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, date])
+  @@index([date])
+  @@map("daily_performance")
+}
+
+enum TicketType {
+  Case
+  Complaint
+  Exception
+}
+
+enum TicketStatus {
+  Open
+  Closed
+}
+
+model OperationsTicket {
+  id          Int          @id @default(autoincrement())
+  branchId    Int          @map("branch_id")
+  type        TicketType
+  status      TicketStatus
+  createdAt   DateTime     @map("created_at")
+  resolvedAt  DateTime?    @map("resolved_at")
+  slaBreached Boolean      @default(false) @map("sla_breached")
+  branch      Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([branchId, createdAt])
+  @@index([status, type])
+  @@map("operations_tickets")
+}

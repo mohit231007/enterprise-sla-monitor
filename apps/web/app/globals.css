@@ -1,0 +1,8 @@
+@import "tailwindcss";
+
+:root { --ink: #172033; --muted: #667085; --line: #e7eaf0; --canvas: #f6f8fc; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--canvas); color: var(--ink); font-family: Arial, Helvetica, sans-serif; }
+button, input { font: inherit; }
+.panel { border: 1px solid var(--line); border-radius: 16px; background: white; box-shadow: 0 1px 2px rgba(16,24,40,.03); }
+.chart-tooltip { border: 1px solid #e7eaf0; border-radius: 10px; background: #fff; box-shadow: 0 6px 18px rgba(16,24,40,.10); padding: 10px 12px; }

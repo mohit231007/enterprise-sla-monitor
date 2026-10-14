@@ -7,8 +7,8 @@ export const DATASETS = {
 } as const;
 export type Dataset = keyof typeof DATASETS;
 const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const nonnegative = z.coerce.number().finite().nonnegative();
-const nonnegativeInt = z.coerce.number().int().nonnegative();
+const nonnegative = z.string().regex(/^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/).transform(Number).pipe(z.number().finite().nonnegative());
+const nonnegativeInt = z.string().regex(/^(?:0|[1-9]\\d*)$/).transform(Number).pipe(z.number().int().nonnegative());
 const performance = z.object({
   branch_name: z.string().trim().min(1), date: isoDay,
   revenue: nonnegative, revenue_target: nonnegative,
@@ -84,7 +84,14 @@ export async function ingestCsv(prisma: PrismaClient, input: z.infer<typeof uplo
     } catch(err) { errors.push("Row "+line+": "+(err instanceof Error?err.message:"Invalid row")); }
     if (errors.length>=25) break;
   }
-  if(errors.length) throw new ValidationError(errors);
+  if(errors.length) {
+    await prisma.ingestionRun.create({data:{
+      source:IngestionSource.CSV_UPLOAD,status:IngestionStatus.FAILED,
+      recordsReceived:input.rows.length,recordsRejected:input.rows.length,
+      completedAt:new Date(),notes:"Rejected "+input.dataset+" upload ("+input.filename+"): "+errors.slice(0,3).join(" | ")
+    }});
+    throw new ValidationError(errors);
+  }
   // Validation completed before the transaction; no partial committed rows.
   const run = await prisma.$transaction(async(tx)=>{
     const run = await tx.ingestionRun.create({data:{

@@ -8,8 +8,9 @@
     "build": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "db:generate": "node ../../node_modules/prisma/build/index.js generate",
-    "db:push": "node ../../node_modules/prisma/build/index.js db push",
-    "db:seed": "npm run db:push && node --import tsx prisma/seed.ts",
+    "db:migrate": "node ../../node_modules/prisma/build/index.js migrate deploy",
+    "db:seed": "npm run db:migrate && node --import tsx prisma/seed.ts",
+    "db:bootstrap": "node --import tsx prisma/bootstrap.ts",
     "test": "node ../../node_modules/vitest/vitest.mjs run"
   },
   "prisma": { "seed": "tsx prisma/seed.ts" },

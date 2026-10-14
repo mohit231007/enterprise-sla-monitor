@@ -6,3 +6,35 @@ body { margin: 0; background: var(--canvas); color: var(--ink); font-family: Ari
 button, input { font: inherit; }
 .panel { border: 1px solid var(--line); border-radius: 16px; background: white; box-shadow: 0 1px 2px rgba(16,24,40,.03); }
 .chart-tooltip { border: 1px solid #e7eaf0; border-radius: 10px; background: #fff; box-shadow: 0 6px 18px rgba(16,24,40,.10); padding: 10px 12px; }
+
+
+/* Only the dedicated report is printable; no banker key, uploader, navigation or dashboard UI. */
+.branch360-print-report { display:none; }
+@media print {
+ @page { size:A4 portrait; margin:14mm 12mm; }
+ html,body { margin:0!important; padding:0!important; background:#fff!important; color:#172033!important; print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+ body * { visibility:hidden!important; }
+ #branch360-print-report, #branch360-print-report * { visibility:visible!important; }
+ #branch360-print-report {
+   display:block!important; position:absolute!important; top:0; left:0;
+   width:100%!important; padding:0!important; font:10pt/1.4 Arial,Helvetica,sans-serif!important;
+ }
+ #branch360-print-report .print-report-head { padding-bottom:12px; margin-bottom:14px; border-bottom:2px solid #1e40af; }
+ #branch360-print-report h1 { font-size:20pt; font-weight:750; margin:3px 0 5px; color:#102b52; }
+ #branch360-print-report h2 { font-size:12pt; font-weight:700; margin:17px 0 8px; color:#102b52; break-after:avoid; }
+ #branch360-print-report p { margin:5px 0; }
+ #branch360-print-report .print-kicker { color:#2563eb; font-size:8pt; font-weight:700; letter-spacing:1.2px; }
+ #branch360-print-report .print-report-meta { margin-top:8px; display:flex; justify-content:space-between; gap:20px; font-size:8pt; color:#536277; }
+ #branch360-print-report .print-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+ #branch360-print-report .print-metrics>div { border:1px solid #d8e1ed; border-radius:5px; padding:9px; break-inside:avoid; }
+ #branch360-print-report .print-metrics small { display:block; font-size:8pt; color:#52647c; }
+ #branch360-print-report .print-metrics strong { display:block; font-size:12pt; margin-top:4px; color:#172033; }
+ #branch360-print-report .print-table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:8pt; }
+ #branch360-print-report .print-table th { background:#eaf0f9!important; text-align:left; font-weight:700; }
+ #branch360-print-report .print-table th, #branch360-print-report .print-table td { border-bottom:1px solid #d9e1eb; padding:7px 5px; overflow-wrap:anywhere; vertical-align:top; }
+ #branch360-print-report .print-table td small { display:block; color:#667085; font-size:7pt; }
+ #branch360-print-report thead { display:table-header-group; }
+ #branch360-print-report tr { break-inside:avoid; }
+ #branch360-print-report .print-digest { overflow-wrap:anywhere; font:8pt/1.5 monospace; }
+ #branch360-print-report .print-disclaimer { border-top:1px solid #ddd; margin-top:16px; padding-top:8px; color:#64748b; font-size:8pt; }
+}

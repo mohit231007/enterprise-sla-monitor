@@ -15,8 +15,10 @@ button, input { font: inherit; }
  html,body { margin:0!important; padding:0!important; background:#fff!important; color:#172033!important; print-color-adjust:exact; -webkit-print-color-adjust:exact; }
  /* Remove the dashboard from the print formatting tree entirely. Hidden
     elements still consume pages and produced three empty A4 sheets. */
- body:has(#branch360-print-report) main { display:none!important; }
- body:has(#branch360-print-report) > * { display:contents!important; }
+ body:has(#branch360-print-report) main,
+ body:has(#branch360-print-report) main > div { display:contents!important; }
+ /* The report is a direct sibling of dashboard panels under main > div. */
+ body:has(#branch360-print-report) main > div > :not(#branch360-print-report) { display:none!important; }
  #branch360-print-report {
    display:block!important; position:static!important;
    width:100%!important; padding:0!important; font:10pt/1.4 Arial,Helvetica,sans-serif!important;

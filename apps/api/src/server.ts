@@ -24,7 +24,7 @@ app.get("/api/dashboard/data-status", async (_request, response, next) => {
     ]);
     response.json({
       mode: process.env.DATA_MODE ?? "SIMULATED_LIVE",
-      database: "SQLite",
+      database: "PostgreSQL",
       totalRuns,
       latestRun: latestRun && {
         source: latestRun.source,

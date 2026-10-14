@@ -4,7 +4,7 @@ export type Cell = string | number | boolean | null | undefined;
 export type Sheet = {name:string;rows:Cell[][]};
 const encoder=new TextEncoder();
 const bytes=(s:string)=>encoder.encode(s);
-const esc=(s:string)=>s.replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&apos;");
+const esc=(s:string)=>s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g,"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&apos;");
 function colName(index:number){let x=index+1,result="";while(x){x--;result=String.fromCharCode(65+x%26)+result;x=Math.floor(x/26);}return result;}
 function sheetXml(rows:Cell[][]){
  const lines=rows.map((row,ri)=>'<row r="'+(ri+1)+'">'+row.map((v,ci)=>{
@@ -42,7 +42,17 @@ function pack(files:{name:string;data:Uint8Array}[]){
 }
 export function generateXlsx(sheets:Sheet[]):Uint8Array{
  if(!sheets.length)throw Error("At least one worksheet is required");
- const list=sheets.map((sheet,i)=>({name:(sheet.name.replace(/[\\/*?:\[\]]/g," ").slice(0,31)||"Sheet "+(i+1)),rows:sheet.rows}));
+ const used=new Set<string>();
+ const list=sheets.map((sheet,i)=>{
+  const cleaned=sheet.name.replace(/[\\\\/*?:\\[\\]]/g," ").replace(/[\\u0000-\\u001f]/g,"").replace(/^'+|'+$/g,"").trim()||"Sheet "+(i+1);
+  let name=cleaned.slice(0,31);
+  for(let suffix=2;used.has(name.toLowerCase());suffix++){
+    const extra=" ("+suffix+")";
+    name=cleaned.slice(0,31-extra.length)+extra;
+  }
+  used.add(name.toLowerCase());
+  return {name,rows:sheet.rows};
+ });
  const workbook='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
  '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+
  list.map((s,i)=>'<sheet name="'+esc(s.name)+'" sheetId="'+(i+1)+'" r:id="rId'+(i+1)+'"/>').join("")+'</sheets></workbook>';

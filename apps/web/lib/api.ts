@@ -1,4 +1,4 @@
-import { DashboardData } from "./types";
+import { DashboardData, DataStatus } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 async function request<T>(path: string): Promise<T> {
@@ -16,4 +16,12 @@ export async function getDashboard(params: URLSearchParams): Promise<DashboardDa
     request<{ trends: DashboardData["trends"] }>(`/api/dashboard/trends${suffix}`)
   ]);
   return { summary, branches: branchData.branches, interventions: interventionData.interventions, trends: trendData.trends };
+}
+
+export function getDataStatus() { return request<DataStatus>("/api/dashboard/data-status"); }
+
+export async function appendDemoEvent() {
+  const response = await fetch(`${API_URL}/api/dashboard/demo/tick`, { method: "POST" });
+  if (!response.ok) throw new Error(`Could not ingest demo event (${response.status})`);
+  return response.json() as Promise<{ message: string }>;
 }

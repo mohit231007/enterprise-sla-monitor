@@ -3,3 +3,4 @@ export type Branch = { id: number; name: string; region: string; managerName: st
 export type Intervention = { branchId: number; branchName: string; criticalMetric: string; suggestedAction: string; status: "Critical" | "Warning"; breachPercentage: number; openComplaints: number; avgTatHours: number };
 export type Trend = { date: string; complaints: number; exceptions: number };
 export type DashboardData = { summary: Summary; branches: Branch[]; interventions: Intervention[]; trends: Trend[] };
+export type DataStatus = { mode: string; database: string; totalRuns: number; latestRun: null | { source: string; status: string; completedAt: string | null; recordsAccepted: number; recordsRejected: number; latestEventAt: string | null; notes: string | null } };

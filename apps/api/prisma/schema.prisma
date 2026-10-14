@@ -58,3 +58,31 @@ model OperationsTicket {
   @@index([status, type])
   @@map("operations_tickets")
 }
+
+enum IngestionSource {
+  SEED
+  DEMO_STREAM
+  CSV_UPLOAD
+}
+
+enum IngestionStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+model IngestionRun {
+  id              Int             @id @default(autoincrement())
+  source          IngestionSource
+  status          IngestionStatus @default(RUNNING)
+  startedAt       DateTime        @default(now()) @map("started_at")
+  completedAt     DateTime?       @map("completed_at")
+  recordsReceived Int             @default(0) @map("records_received")
+  recordsAccepted Int             @default(0) @map("records_accepted")
+  recordsRejected Int             @default(0) @map("records_rejected")
+  latestEventAt   DateTime?       @map("latest_event_at")
+  notes           String?
+
+  @@index([startedAt])
+  @@map("ingestion_runs")
+}

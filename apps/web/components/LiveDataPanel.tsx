@@ -1,0 +1,8 @@
+"use client";
+import { Database, Play, Radio, RefreshCw } from "lucide-react";
+import { DataStatus } from "@/lib/types";
+
+export function LiveDataPanel({ status, onSimulate, busy }: { status: DataStatus | null; onSimulate: () => void; busy: boolean }) {
+  const latest = status?.latestRun?.latestEventAt ? new Date(status.latestRun.latestEventAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "medium" }) : "Waiting for first ingestion";
+  return <section className="panel mb-6 flex flex-col gap-4 border-blue-100 bg-gradient-to-r from-blue-50/90 to-white p-4 lg:flex-row lg:items-center lg:justify-between"><div className="flex items-start gap-3"><span className="mt-0.5 rounded-xl bg-blue-600 p-2 text-white"><Radio size={18} /></span><div><div className="flex flex-wrap items-center gap-2"><h2 className="font-semibold text-slate-900">Live data workspace</h2><span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-bold tracking-wide text-blue-700">{status?.mode?.replaceAll("_", " ") ?? "LOADING"}</span></div><p className="mt-1 text-sm text-slate-600">Database: {status?.database ?? "…"} · {status?.totalRuns ?? 0} ingestion runs · Last event: {latest}</p><p className="mt-1 text-xs text-slate-500">{status?.latestRun?.notes ?? "This demo never claims to use real customer or bank data."}</p></div></div><button onClick={onSimulate} disabled={busy} className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"><Play size={16} />{busy ? <><RefreshCw size={15} className="animate-spin" />Ingesting…</> : "Simulate an event"}</button></section>;
+}

@@ -3,6 +3,7 @@ import cors from "cors";
 import express from "express";
 import { z } from "zod";
 import { getBranchMetrics, getDateRange, interventionFor, prisma } from "./dashboard.js";
+import { appendDemoEvent } from "./demo-stream.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? 4000);
@@ -14,6 +15,44 @@ const querySchema = z.object({ from: z.string().optional(), to: z.string().optio
 const formatRange = (from: Date, to: Date) => ({ from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) });
 
 app.get("/health", (_request, response) => response.json({ status: "ok" }));
+
+app.get("/api/dashboard/data-status", async (_request, response, next) => {
+  try {
+    const [latestRun, totalRuns] = await Promise.all([
+      prisma.ingestionRun.findFirst({ orderBy: { startedAt: "desc" } }),
+      prisma.ingestionRun.count()
+    ]);
+    response.json({
+      mode: process.env.DATA_MODE ?? "SIMULATED_LIVE",
+      database: "SQLite",
+      totalRuns,
+      latestRun: latestRun && {
+        source: latestRun.source,
+        status: latestRun.status,
+        completedAt: latestRun.completedAt,
+        recordsAccepted: latestRun.recordsAccepted,
+        recordsRejected: latestRun.recordsRejected,
+        latestEventAt: latestRun.latestEventAt,
+        notes: latestRun.notes
+      }
+    });
+  } catch (error) { next(error); }
+});
+
+app.post("/api/dashboard/demo/tick", async (_request, response, next) => {
+  try {
+    const event = await appendDemoEvent(prisma);
+    response.status(201).json({ message: "Simulated operational event ingested.", event });
+  } catch (error) { next(error); }
+});
+
+app.get("/api/dashboard/query-catalog", (_request, response) => response.json({
+  queries: [{
+    name: "Branch performance and SLA rollup",
+    purpose: "Uses isolated performance and ticket CTEs before joining them to prevent duplicated revenue or case counts.",
+    sql: `WITH performance_rollup AS (SELECT branch_id, SUM(revenue) FROM daily_performance WHERE date BETWEEN :from AND :to GROUP BY branch_id), ticket_rollup AS (SELECT branch_id, COUNT(*), AVG((julianday(resolved_at) - julianday(created_at)) * 24) AS avg_tat_hours FROM operations_tickets WHERE created_at BETWEEN :from AND :to GROUP BY branch_id) SELECT ... FROM branches b LEFT JOIN performance_rollup p ON p.branch_id = b.id LEFT JOIN ticket_rollup t ON t.branch_id = b.id;`
+  }]
+}));
 
 app.get("/api/dashboard/summary", async (request, response, next) => {
   try {

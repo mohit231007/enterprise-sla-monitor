@@ -14,20 +14,53 @@ The core portfolio query uses SQL common table expressions (CTEs), not frontend 
 
 - **Web:** Next.js 15, React, Tailwind CSS, Recharts, Lucide React
 - **API:** Node.js, Express, TypeScript
-- **Data:** SQLite with Prisma ORM
+- **Data:** PostgreSQL with Prisma ORM (Supabase in production; Docker locally)
 
 ## Quick start
 
 ```bash
+docker compose up -d postgres
 cp .env.example apps/api/.env
 cp .env.example apps/web/.env.local
-npm install
+npm ci
 npm run db:generate
 npm run db:seed
 npm run dev
 ```
 
 Open `http://localhost:3000`. The API runs at `http://localhost:4000`.
+
+`docker compose down` stops PostgreSQL while preserving its local volume. Use
+`docker compose down -v` only when you deliberately want to discard local data.
+
+## Production deployment: Supabase + Render + Vercel
+
+The repository is configured for the selected free-tier architecture:
+
+```mermaid
+flowchart TB
+  Browser["User browser"] --> Vercel["Vercel: Next.js web"]
+  Vercel --> Render["Render: Express API"]
+  Render --> Supabase[("Supabase: PostgreSQL")]
+```
+
+1. **Supabase** — create a PostgreSQL project and copy both the pooled connection
+   string and the direct connection string. Set `DATABASE_URL` to the pooled URL
+   and `DIRECT_URL` to the direct URL. Keep both private.
+2. **Render** — create a Blueprint from this repository. `render.yaml` provisions
+   the API and runs `prisma migrate deploy` plus a safe first-run bootstrap. In
+   the Render environment, add `DATABASE_URL`, `DIRECT_URL`, and later
+   `CORS_ORIGIN` (your Vercel URL). Do not use `db:seed` in production: it resets
+   data; `db:bootstrap` seeds only an empty database.
+3. **Vercel** — import this repository, keep the project root at the repository
+   root, and set `NEXT_PUBLIC_API_URL` to the Render service URL. Redeploy after
+   changing it.
+4. Return to Render and set `CORS_ORIGIN` to the exact Vercel production URL;
+   deploy the API once more.
+
+After deployment, open `<render-url>/health`, then the Vercel URL. Use the
+dashboard’s **Simulate an event** control to show a persisted PostgreSQL write,
+ingestion audit, and refreshed SQL rollups in a portfolio demo.
 
 ## API
 
@@ -59,7 +92,7 @@ flowchart TB
   User["Operations & management"] --> Web["Next.js dashboard"]
   Web -->|"JSON / HTTPS"| API["Express API + policy layer"]
   API --> ORM["Prisma ORM"]
-  ORM --> DB[("SQLite / PostgreSQL-ready")]
+  ORM --> DB[("PostgreSQL")]
   Seeder["Seed / ingestion job"] --> DB
   CI["GitHub Actions CI"] --> API
   CI --> Web
@@ -76,8 +109,13 @@ flowchart TB
 
 ## Resume framing
 
-> Built **Branch360**, a full-stack enterprise branch analytics MVP using Next.js, Express, Prisma, and SQLite. Designed a testable rules engine to identify SLA and complaint-backlog risks, with executive KPI, trend, portfolio-health, and intervention views; added automated CI and a 30-day deterministic data seed for reproducible demos.
+> Built **Branch360**, a deployable full-stack branch analytics MVP using Next.js, Express, Prisma, PostgreSQL/Supabase, Render, and Vercel. Designed SQL CTE rollups and a testable rules engine to identify SLA and complaint-backlog risks; implemented auditable simulated event ingestion, CI, and a reproducible 30-day seed for live portfolio demos.
 
 ## Data model and seed behavior
 
-`npm run db:seed` recreates the local database with five Indian-region branches, 30 daily performance records per branch, and realistic tickets. Seeded ticket distributions intentionally create both warning and critical scenarios so the intervention table can be demonstrated immediately.
+`npm run db:seed` recreates the local database with five Indian-region branches,
+30 daily performance records per branch, and realistic tickets. Seeded ticket
+distributions intentionally create both warning and critical scenarios so the
+intervention table can be demonstrated immediately. It is intended for local
+development only. Production uses `npm run db:bootstrap`, which seeds only an
+empty database and never overwrites data.

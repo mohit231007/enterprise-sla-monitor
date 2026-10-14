@@ -9,7 +9,8 @@
     "test": "npm run test --workspace @branch360/api",
     "db:generate": "npm run db:generate --workspace @branch360/api",
     "db:migrate": "npm run db:migrate --workspace @branch360/api",
-    "db:seed": "npm run db:seed --workspace @branch360/api"
+    "db:seed": "npm run db:seed --workspace @branch360/api",
+    "db:bootstrap": "npm run db:bootstrap --workspace @branch360/api"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

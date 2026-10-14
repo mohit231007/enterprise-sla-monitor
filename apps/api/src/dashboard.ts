@@ -50,10 +50,10 @@ export async function getBranchMetrics(range: DateRange) {
       WHERE created_at >= ${range.from} AND created_at <= ${range.to}
       GROUP BY branch_id
     )
-    SELECT b.id, b.name, b.region, b.manager_name AS managerName,
-      p.revenue, p.revenue_target AS revenueTarget, t.avg_tat_hours AS avgTatHours,
-      t.pending_cases AS pendingCases, t.open_complaints AS openComplaints,
-      t.sla_breaches AS slaBreaches, t.active_sla_breaches AS activeSlaBreaches, t.ticket_count AS ticketCount
+    SELECT b.id, b.name, b.region, b.manager_name AS "managerName",
+      p.revenue, p.revenue_target AS "revenueTarget", t.avg_tat_hours AS "avgTatHours",
+      t.pending_cases AS "pendingCases", t.open_complaints AS "openComplaints",
+      t.sla_breaches AS "slaBreaches", t.active_sla_breaches AS "activeSlaBreaches", t.ticket_count AS "ticketCount"
     FROM branches b
     LEFT JOIN performance_rollup p ON p.branch_id = b.id
     LEFT JOIN ticket_rollup t ON t.branch_id = b.id

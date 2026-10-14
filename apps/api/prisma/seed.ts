@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { PrismaClient, TicketStatus, TicketType } from "@prisma/client";
+import { IngestionSource, IngestionStatus, PrismaClient, TicketStatus, TicketType } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -25,10 +25,12 @@ function pseudoRandom(seed: number): number {
 }
 
 async function main() {
+  await prisma.ingestionRun.deleteMany();
   await prisma.operationsTicket.deleteMany();
   await prisma.dailyPerformance.deleteMany();
   await prisma.branch.deleteMany();
 
+  let generatedRecords = 0;
   for (const [branchIndex, branchData] of branches.entries()) {
     // Keep synthetic volume/risk controls out of the persisted Branch model.
     const { baseRevenue, target, ticketVolume, breachRate, openComplaints, ...branchRecord } = branchData;
@@ -49,6 +51,7 @@ async function main() {
       };
     });
     await prisma.dailyPerformance.createMany({ data: performance });
+    generatedRecords += performance.length;
 
     const tickets = Array.from({ length: ticketVolume }, (_, index) => {
       const createdDaysAgo = Math.floor(pseudoRandom(branchIndex * 1000 + index) * 30);
@@ -69,7 +72,20 @@ async function main() {
       };
     });
     await prisma.operationsTicket.createMany({ data: tickets });
+    generatedRecords += tickets.length;
   }
+
+  await prisma.ingestionRun.create({
+    data: {
+      source: IngestionSource.SEED,
+      status: IngestionStatus.SUCCESS,
+      completedAt: new Date(),
+      recordsReceived: generatedRecords,
+      recordsAccepted: generatedRecords,
+      latestEventAt: new Date(),
+      notes: "Deterministic 30-day Branch360 demo baseline."
+    }
+  });
 
   console.log("Seeded 5 branches, 150 daily performance records, and operational tickets.");
 }

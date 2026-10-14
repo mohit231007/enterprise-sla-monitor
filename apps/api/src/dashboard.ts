@@ -9,7 +9,7 @@ export type DateRange = { from: Date; to: Date };
 // use UTC-convention timestamps; they do not carry PostgreSQL timezone metadata.
 // This is a demo policy, not an approved bank's local business-calendar policy.
 export function parseUtcDay(value: string): Date {
-  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new Error("Use valid YYYY-MM-DD dates, with from before to.");
   }
   const date = new Date(value + "T00:00:00.000Z");

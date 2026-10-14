@@ -1,0 +1,12 @@
+"use client";
+import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Branch, Trend } from "@/lib/types";
+
+const money = (value: number) => `₹${(value / 100000).toFixed(1)}L`;
+export function PerformanceChart({ branches }: { branches: Branch[] }) {
+  return <div className="panel p-5"><div className="mb-5"><h2 className="font-semibold text-slate-900">Branch-wise business performance</h2><p className="mt-1 text-sm text-slate-500">Revenue versus target across the selected period</p></div><div className="h-76"><ResponsiveContainer width="100%" height="100%"><BarChart data={branches} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#edf0f4" /><XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: "#667085", fontSize: 11 }} /><YAxis tickFormatter={money} tickLine={false} axisLine={false} tick={{ fill: "#667085", fontSize: 11 }} /><Tooltip formatter={(value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value)} /><Legend /><Bar dataKey="revenue" name="Revenue" fill="#2563eb" radius={[5, 5, 0, 0]} /><Bar dataKey="revenueTarget" name="Target" fill="#bfdbfe" radius={[5, 5, 0, 0]} /></BarChart></ResponsiveContainer></div></div>;
+}
+export function TrendChart({ trends }: { trends: Trend[] }) {
+  const data = trends.map((trend) => ({ ...trend, day: new Date(`${trend.date}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) }));
+  return <div className="panel p-5"><div className="mb-5"><h2 className="font-semibold text-slate-900">Cases and exceptions trend</h2><p className="mt-1 text-sm text-slate-500">Operational inflow over the selected period</p></div><div className="h-76"><ResponsiveContainer width="100%" height="100%"><LineChart data={data} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#edf0f4" /><XAxis dataKey="day" minTickGap={30} tickLine={false} axisLine={false} tick={{ fill: "#667085", fontSize: 11 }} /><YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fill: "#667085", fontSize: 11 }} /><Tooltip /><Legend /><Line type="monotone" dataKey="complaints" name="Complaints" stroke="#e11d48" strokeWidth={2.5} dot={false} /><Line type="monotone" dataKey="exceptions" name="Exceptions" stroke="#f59e0b" strokeWidth={2.5} dot={false} /></LineChart></ResponsiveContainer></div></div>;
+}

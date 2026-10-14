@@ -1,0 +1,16 @@
+{
+  "name": "branch360-enterprise-sla-dashboard",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace @branch360/api\" \"npm run dev --workspace @branch360/web\"",
+    "build": "npm run build --workspace @branch360/api && npm run build --workspace @branch360/web",
+    "test": "npm run test --workspace @branch360/api",
+    "db:generate": "npm run db:generate --workspace @branch360/api",
+    "db:seed": "npm run db:seed --workspace @branch360/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

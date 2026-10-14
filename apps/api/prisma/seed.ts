@@ -24,7 +24,7 @@ function pseudoRandom(seed: number): number {
   return value - Math.floor(value);
 }
 
-async function main() {
+export async function seedDatabase() {
   await prisma.ingestionRun.deleteMany();
   await prisma.operationsTicket.deleteMany();
   await prisma.dailyPerformance.deleteMany();
@@ -90,9 +90,12 @@ async function main() {
   console.log("Seeded 5 branches, 150 daily performance records, and operational tickets.");
 }
 
-main()
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  })
-  .finally(async () => prisma.$disconnect());
+export async function disconnectSeedDatabase() {
+  await prisma.$disconnect();
+}
+
+if (process.argv[1]?.endsWith("seed.ts")) {
+  seedDatabase()
+    .catch((error) => { console.error(error); process.exit(1); })
+    .finally(disconnectSeedDatabase);
+}

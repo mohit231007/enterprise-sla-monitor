@@ -1,4 +1,4 @@
-import { PrismaClient, IngestionSource, IngestionStatus, TicketType, TicketStatus } from "@prisma/client";
+import { Prisma, PrismaClient, IngestionSource, IngestionStatus, TicketType, TicketStatus } from "@prisma/client";
 import { z } from "zod";
 
 export const DATASETS = {
@@ -92,35 +92,58 @@ export async function ingestCsv(prisma: PrismaClient, input: z.infer<typeof uplo
     }});
     throw new ValidationError(errors);
   }
-  // Validation completed before the transaction; no partial committed rows.
-  const run = await prisma.$transaction(async(tx)=>{
-    const run = await tx.ingestionRun.create({data:{
-      source:IngestionSource.CSV_UPLOAD,status:IngestionStatus.RUNNING,
-      recordsReceived:prepared.length,notes:"Upload: "+input.filename+" ("+input.dataset+")"
-    }});
-    for (const row of prepared) {
-      if(input.dataset==="performance") {
-        await tx.dailyPerformance.upsert({
-          where:{branchId_date:{branchId:row.branchId,date:row.date}},
-          create:row, update:{revenue:row.revenue,revenueTarget:row.revenueTarget,
-            accountsOpened:row.accountsOpened,loansProcessed:row.loansProcessed}
-        });
-      } else {
-        await tx.operationsTicket.upsert({
-          where:{externalTicketId:row.externalTicketId},
-          create:row,
-          update:{branchId:row.branchId,type:row.type,status:row.status,
-            createdAt:row.createdAt,resolvedAt:row.resolvedAt,slaBreached:row.slaBreached}
-        });
-      }
-    }
-    return tx.ingestionRun.update({where:{id:run.id},data:{
-      status:IngestionStatus.SUCCESS,recordsAccepted:prepared.length,
-      recordsRejected:0,completedAt:new Date(),
-      latestEventAt:new Date(Math.max(...prepared.map(r=>(r.date??r.createdAt).getTime())))
-    }});
-  },{timeout:30000});
-  return {runId:run.id,dataset:input.dataset,accepted:run.recordsAccepted,
-    dateFrom:new Date(Math.min(...prepared.map(r=>(r.date??r.createdAt).getTime()))).toISOString().slice(0,10),
-    dateTo:new Date(Math.max(...prepared.map(r=>(r.date??r.createdAt).getTime()))).toISOString().slice(0,10)};
+  // One set-based statement replaces N per-row UPSERTs. This avoids long-running
+  // interactive transactions on hosted PostgreSQL poolers (Render + Supabase).
+  // The write and its success audit share one short atomic database transaction.
+  const latestEventAt = new Date(Math.max(...prepared.map(r=>(r.date??r.createdAt).getTime())));
+  const dateFrom = new Date(Math.min(...prepared.map(r=>(r.date??r.createdAt).getTime()))).toISOString().slice(0,10);
+  const dateTo = latestEventAt.toISOString().slice(0,10);
+  const statement = input.dataset === "performance"
+    ? Prisma.sql`
+      INSERT INTO daily_performance
+        (branch_id, date, revenue, revenue_target, accounts_opened, loans_processed)
+      SELECT x.branch_id, x.date::timestamp, x.revenue, x.revenue_target,
+             x.accounts_opened, x.loans_processed
+      FROM jsonb_to_recordset(${JSON.stringify(prepared.map(r=>({
+        branch_id:r.branchId,date:r.date.toISOString(),revenue:r.revenue,
+        revenue_target:r.revenueTarget,accounts_opened:r.accountsOpened,
+        loans_processed:r.loansProcessed
+      })))}::jsonb) AS x(
+        branch_id integer, date text, revenue double precision,
+        revenue_target double precision, accounts_opened integer, loans_processed integer
+      )
+      ON CONFLICT (branch_id,date) DO UPDATE SET
+        revenue=EXCLUDED.revenue,revenue_target=EXCLUDED.revenue_target,
+        accounts_opened=EXCLUDED.accounts_opened,loans_processed=EXCLUDED.loans_processed
+    `
+    : Prisma.sql`
+      INSERT INTO operations_tickets
+        (external_ticket_id, branch_id, type, status, created_at, resolved_at, sla_breached)
+      SELECT x.external_ticket_id, x.branch_id, x.type::"TicketType",
+             x.status::"TicketStatus", x.created_at::timestamp,
+             x.resolved_at::timestamp, x.sla_breached
+      FROM jsonb_to_recordset(${JSON.stringify(prepared.map(r=>({
+        external_ticket_id:r.externalTicketId,branch_id:r.branchId,
+        type:r.type,status:r.status,created_at:r.createdAt.toISOString(),
+        resolved_at:r.resolvedAt?.toISOString()??null,sla_breached:r.slaBreached
+      })))}::jsonb) AS x(
+        external_ticket_id text, branch_id integer, type text, status text,
+        created_at text, resolved_at text, sla_breached boolean
+      )
+      ON CONFLICT (external_ticket_id) DO UPDATE SET
+        branch_id=EXCLUDED.branch_id,type=EXCLUDED.type,
+        status=EXCLUDED.status,created_at=EXCLUDED.created_at,
+        resolved_at=EXCLUDED.resolved_at,sla_breached=EXCLUDED.sla_breached
+    `;
+  const [written,run] = await prisma.$transaction([
+    prisma.$executeRaw(statement),
+    prisma.ingestionRun.create({data:{
+      source:IngestionSource.CSV_UPLOAD,status:IngestionStatus.SUCCESS,
+      recordsReceived:prepared.length,recordsAccepted:prepared.length,
+      recordsRejected:0,completedAt:new Date(),latestEventAt,
+      notes:"Upload: "+input.filename+" ("+input.dataset+")"
+    }})
+  ]);
+  if(written!==prepared.length) throw new Error("Database row count mismatch");
+  return {runId:run.id,dataset:input.dataset,accepted:run.recordsAccepted,dateFrom,dateTo};
 }

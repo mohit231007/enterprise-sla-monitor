@@ -7,8 +7,8 @@ export const DATASETS = {
 } as const;
 export type Dataset = keyof typeof DATASETS;
 const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const nonnegative = z.string().regex(/^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/).transform(Number).pipe(z.number().finite().nonnegative());
-const nonnegativeInt = z.string().regex(/^(?:0|[1-9]\\d*)$/).transform(Number).pipe(z.number().int().nonnegative());
+const nonnegative = z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/).transform(Number).pipe(z.number().finite().nonnegative());
+const nonnegativeInt = z.string().regex(/^(?:0|[1-9]\d*)$/).transform(Number).pipe(z.number().int().nonnegative());
 const performance = z.object({
   branch_name: z.string().trim().min(1), date: isoDay,
   revenue: nonnegative, revenue_target: nonnegative,

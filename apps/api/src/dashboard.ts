@@ -5,16 +5,30 @@ export const prisma = new PrismaClient();
 
 export type DateRange = { from: Date; to: Date };
 
-export function toInclusiveEnd(date: Date) {
+// A Branch360 reporting day is a UTC calendar day. Database TIMESTAMP columns
+// use UTC-convention timestamps; they do not carry PostgreSQL timezone metadata.
+// This is a demo policy, not an approved bank's local business-calendar policy.
+export function parseUtcDay(value: string): Date {
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) {
+    throw new Error("Use valid YYYY-MM-DD dates, with from before to.");
+  }
+  const date = new Date(value + "T00:00:00.000Z");
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
+    throw new Error("Use valid YYYY-MM-DD dates, with from before to.");
+  }
+  return date;
+}
+
+export function toInclusiveEnd(date: Date): Date {
   const end = new Date(date);
-  end.setHours(23, 59, 59, 999);
+  end.setUTCHours(23, 59, 59, 999);
   return end;
 }
 
 export async function getDateRange(from?: string, to?: string): Promise<DateRange> {
   const latest = await prisma.dailyPerformance.aggregate({ _max: { date: true } });
-  const end = to ? toInclusiveEnd(new Date(`${to}T00:00:00`)) : toInclusiveEnd(latest._max.date ?? new Date());
-  const start = from ? new Date(`${from}T00:00:00`) : new Date(end.getTime() - 29 * 24 * 60 * 60 * 1000);
+  const end = toInclusiveEnd(to ? parseUtcDay(to) : (latest._max.date ?? new Date()));
+  const start = from ? parseUtcDay(from) : new Date(end.getTime() - 29 * 24 * 60 * 60 * 1000);
   if (Number.isNaN(start.valueOf()) || Number.isNaN(end.valueOf()) || start > end) {
     throw new Error("Use valid YYYY-MM-DD dates, with from before to.");
   }

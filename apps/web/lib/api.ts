@@ -36,3 +36,15 @@ export async function uploadCsv(payload:{
  if(!response.ok)throw new Error([data.error,...(data.details??[]).slice(0,5)].filter(Boolean).join(" | ")||`Upload failed (${response.status})`);
  return data;
 }
+
+export function getQueryCatalog(){return request<{queries:{id:string;name:string;description:string;sql:string}[]}>("/api/dashboard/sql-catalog");}
+export function runCatalogQuery(id:string,from:string,to:string){return request<{rows:Record<string,unknown>[]}>("/api/dashboard/sql-results?"+new URLSearchParams({id,from,to}));}
+export function getIngestionHistory(){return request<{runs:{id:number;source:string;status:string;startedAt:string;completedAt:string|null;recordsReceived:number;recordsAccepted:number;recordsRejected:number;notes:string|null}[]}>("/api/dashboard/ingestion-history");}
+export async function createReport(from:string,to:string){
+ const response=await fetch(`${API_URL}/api/dashboard/reports`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({from,to})});
+ if(!response.ok)throw Error("Could not save report snapshot ("+response.status+")");
+ return response.json() as Promise<{
+ id:string;createdAt:string;contentSha256:string;period:{from:string;to:string};
+ summary:DashboardData["summary"];branches:DashboardData["branches"];interventions:DashboardData["interventions"];ingestionRunIds:number[]
+ }>;
+}

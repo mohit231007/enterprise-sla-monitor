@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: branch360
+      POSTGRES_PASSWORD: branch360
+      POSTGRES_DB: branch360
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U branch360 -d branch360"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - branch360_postgres:/var/lib/postgresql/data
+
+volumes:
+  branch360_postgres:

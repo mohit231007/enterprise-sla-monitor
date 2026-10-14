@@ -9,7 +9,7 @@ const sql = `WITH performance_rollup AS (
   GROUP BY branch_id
 ), ticket_rollup AS (
   SELECT branch_id, COUNT(*) AS ticket_count,
-    AVG((julianday(resolved_at) - julianday(created_at)) * 24) AS avg_tat_hours
+    AVG(EXTRACT(EPOCH FROM (resolved_at - created_at)) / 3600.0) AS avg_tat_hours
   FROM operations_tickets
   WHERE created_at BETWEEN :from AND :to
   GROUP BY branch_id

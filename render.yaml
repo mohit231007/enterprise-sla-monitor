@@ -1,0 +1,19 @@
+services:
+  - type: web
+    runtime: node
+    name: branch360-api
+    plan: free
+    buildCommand: npm ci && npm run db:generate && npm run build --workspace @branch360/api
+    startCommand: npm run db:migrate && npm run db:bootstrap && npm run start --workspace @branch360/api
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: DATA_MODE
+        value: SIMULATED_LIVE

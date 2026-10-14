@@ -8,6 +8,23 @@ on:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: branch360
+          POSTGRES_PASSWORD: branch360
+          POSTGRES_DB: branch360
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U branch360 -d branch360"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://branch360:branch360@localhost:5432/branch360?schema=public
+      DIRECT_URL: postgresql://branch360:branch360@localhost:5432/branch360?schema=public
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -16,11 +33,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run db:generate
-        env:
-          DATABASE_URL: file:./dev.db
+      - run: npm run db:migrate
       - run: npm run db:seed
-        env:
-          DATABASE_URL: file:./dev.db
       - run: npm run test --workspace @branch360/api
       - run: npm run build --workspace @branch360/api
       - run: npm run build --workspace @branch360/web

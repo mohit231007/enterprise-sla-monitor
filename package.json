@@ -8,6 +8,7 @@
     "build": "npm run build --workspace @branch360/api && npm run build --workspace @branch360/web",
     "test": "npm run test --workspace @branch360/api",
     "db:generate": "npm run db:generate --workspace @branch360/api",
+    "db:migrate": "npm run db:migrate --workspace @branch360/api",
     "db:seed": "npm run db:seed --workspace @branch360/api"
   },
   "devDependencies": {

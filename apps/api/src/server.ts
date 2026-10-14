@@ -103,12 +103,11 @@ app.get("/api/dashboard/reports/:id",async(request,response,next)=>{
  }catch(e){next(e);}
 });
 
+// Backward-compatible catalog route. Use the same PostgreSQL query definitions as the SQL Explorer.
 app.get("/api/dashboard/query-catalog", (_request, response) => response.json({
-  queries: [{
-    name: "Branch performance and SLA rollup",
-    purpose: "Uses isolated performance and ticket CTEs before joining them to prevent duplicated revenue or case counts.",
-    sql: `WITH performance_rollup AS (SELECT branch_id, SUM(revenue) FROM daily_performance WHERE date BETWEEN :from AND :to GROUP BY branch_id), ticket_rollup AS (SELECT branch_id, COUNT(*), AVG((julianday(resolved_at) - julianday(created_at)) * 24) AS avg_tat_hours FROM operations_tickets WHERE created_at BETWEEN :from AND :to GROUP BY branch_id) SELECT ... FROM branches b LEFT JOIN performance_rollup p ON p.branch_id = b.id LEFT JOIN ticket_rollup t ON t.branch_id = b.id;`
-  }]
+  queries: sqlCatalog.map(({id, name, description, sql}) => ({
+    id, name, purpose: description, sql
+  }))
 }));
 
 app.get("/api/dashboard/summary", async (request, response, next) => {

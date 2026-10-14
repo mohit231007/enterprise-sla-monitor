@@ -53,6 +53,7 @@ model OperationsTicket {
   createdAt   DateTime     @map("created_at")
   resolvedAt  DateTime?    @map("resolved_at")
   slaBreached Boolean      @default(false) @map("sla_breached")
+  externalTicketId String? @unique @map("external_ticket_id")
   branch      Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
   @@index([branchId, createdAt])

@@ -15,5 +15,7 @@ services:
         sync: false
       - key: CORS_ORIGIN
         sync: false
+      - key: BANKER_UPLOAD_KEY
+        sync: false
       - key: DATA_MODE
         value: SIMULATED_LIVE

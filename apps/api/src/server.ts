@@ -4,12 +4,21 @@ import express from "express";
 import { z } from "zod";
 import { getBranchMetrics, getDateRange, interventionFor, prisma } from "./dashboard.js";
 import { appendDemoEvent } from "./demo-stream.js";
+import { ingestCsv, uploadSchema, ValidationError } from "./csv-ingest.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? 4000);
+const uploadAttempts = new Map<string,{count:number;reset:number}>();
+function allowUpload(ip:string):boolean{
+ const now=Date.now();const old=uploadAttempts.get(ip);
+ const next=!old||old.reset<now?{count:1,reset:now+60_000}:{count:old.count+1,reset:old.reset};
+ uploadAttempts.set(ip,next);
+ if(uploadAttempts.size>5000)for(const [key,value] of uploadAttempts)if(value.reset<now)uploadAttempts.delete(key);
+ return next.count<=10;
+}
 
 app.use(cors({ origin: process.env.CORS_ORIGIN?.split(",") ?? "http://localhost:3000" }));
-app.use(express.json());
+app.use(express.json({limit:"600kb"}));
 
 const querySchema = z.object({ from: z.string().optional(), to: z.string().optional() });
 const formatRange = (from: Date, to: Date) => ({ from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) });
@@ -46,6 +55,27 @@ app.post("/api/dashboard/demo/tick", async (_request, response, next) => {
   } catch (error) { next(error); }
 });
 
+app.post("/api/dashboard/upload", async (request,response,next) => {
+  try {
+    if(!allowUpload(request.ip??"unknown")){response.status(429).json({error:"Upload rate limit exceeded."});return;}
+    // This key is provisioned server-side. Never expose it as NEXT_PUBLIC_*.
+    const expected=process.env.BANKER_UPLOAD_KEY;
+    const supplied=request.header("x-banker-upload-key") ?? "";
+    const { timingSafeEqual }=await import("node:crypto");
+    if(!expected || !supplied || Buffer.byteLength(expected)!==Buffer.byteLength(supplied) ||
+       !timingSafeEqual(Buffer.from(expected),Buffer.from(supplied))) {
+       response.status(401).json({error:"Banker upload authorization required."});return;
+    }
+    const input=uploadSchema.parse(request.body);
+    if(!input.filename.toLowerCase().endsWith(".csv")){response.status(422).json({error:"Only CSV files are allowed."});return;}
+    const result=await ingestCsv(prisma,input);
+    response.status(201).json(result);
+  }catch(error){
+    if(error instanceof ValidationError){response.status(422).json({error:error.message,details:error.details});return;}
+    if(error instanceof z.ZodError){response.status(422).json({error:"Invalid upload payload",details:error.issues.map(i=>i.path.join(".")+": "+i.message)});return;}
+    next(error);
+  }
+});
 app.get("/api/dashboard/query-catalog", (_request, response) => response.json({
   queries: [{
     name: "Branch performance and SLA rollup",

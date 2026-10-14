@@ -1,4 +1,4 @@
-import { PrismaClient, TicketStatus, TicketType } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { branchHealth, deriveIntervention } from "./interventions.js";
 
 export const prisma = new PrismaClient();
@@ -22,42 +22,59 @@ export async function getDateRange(from?: string, to?: string): Promise<DateRang
 }
 
 export async function getBranchMetrics(range: DateRange) {
-  const branches = await prisma.branch.findMany({
-    include: {
-      performance: { where: { date: { gte: range.from, lte: range.to } } },
-      tickets: { where: { createdAt: { gte: range.from, lte: range.to } } }
-    },
-    orderBy: { name: "asc" }
-  });
+  type BranchMetricRow = {
+    id: number; name: string; region: string; managerName: string;
+    revenue: number | null; revenueTarget: number | null; avgTatHours: number | null;
+    pendingCases: number | null; openComplaints: number | null; slaBreaches: number | null;
+    activeSlaBreaches: number | null; ticketCount: number | null;
+  };
 
-  return branches.map((branch) => {
-    const revenue = branch.performance.reduce((sum, item) => sum + item.revenue, 0);
-    const revenueTarget = branch.performance.reduce((sum, item) => sum + item.revenueTarget, 0);
-    const closed = branch.tickets.filter((ticket) => ticket.status === TicketStatus.Closed && ticket.resolvedAt);
-    const tatHours = closed.map((ticket) => (ticket.resolvedAt!.getTime() - ticket.createdAt.getTime()) / 3_600_000);
-    const breached = branch.tickets.filter((ticket) => ticket.slaBreached).length;
-    const openTickets = branch.tickets.filter((ticket) => ticket.status === TicketStatus.Open);
-    const openComplaints = openTickets.filter((ticket) => ticket.type === TicketType.Complaint).length;
-    const breachPercentage = branch.tickets.length ? (breached / branch.tickets.length) * 100 : 0;
+  // Two independent CTEs avoid a many-to-many join between daily performance and tickets.
+  // This is the source of truth for the branch portfolio, not a frontend calculation.
+  const rows = await prisma.$queryRaw<BranchMetricRow[]>(Prisma.sql`
+    WITH performance_rollup AS (
+      SELECT branch_id, SUM(revenue) AS revenue, SUM(revenue_target) AS revenue_target
+      FROM daily_performance
+      WHERE date >= ${range.from} AND date <= ${range.to}
+      GROUP BY branch_id
+    ), ticket_rollup AS (
+      SELECT branch_id,
+        COUNT(*) AS ticket_count,
+        SUM(CASE WHEN status = 'Open' THEN 1 ELSE 0 END) AS pending_cases,
+        SUM(CASE WHEN status = 'Open' AND type = 'Complaint' THEN 1 ELSE 0 END) AS open_complaints,
+        SUM(CASE WHEN sla_breached = 1 THEN 1 ELSE 0 END) AS sla_breaches,
+        SUM(CASE WHEN status = 'Open' AND sla_breached = 1 THEN 1 ELSE 0 END) AS active_sla_breaches,
+        AVG(CASE WHEN status = 'Closed' AND resolved_at IS NOT NULL
+          THEN (julianday(resolved_at) - julianday(created_at)) * 24 END) AS avg_tat_hours
+      FROM operations_tickets
+      WHERE created_at >= ${range.from} AND created_at <= ${range.to}
+      GROUP BY branch_id
+    )
+    SELECT b.id, b.name, b.region, b.manager_name AS managerName,
+      p.revenue, p.revenue_target AS revenueTarget, t.avg_tat_hours AS avgTatHours,
+      t.pending_cases AS pendingCases, t.open_complaints AS openComplaints,
+      t.sla_breaches AS slaBreaches, t.active_sla_breaches AS activeSlaBreaches, t.ticket_count AS ticketCount
+    FROM branches b
+    LEFT JOIN performance_rollup p ON p.branch_id = b.id
+    LEFT JOIN ticket_rollup t ON t.branch_id = b.id
+    ORDER BY b.name ASC
+  `);
 
-    const avgTatHours = tatHours.length ? tatHours.reduce((sum, hours) => sum + hours, 0) / tatHours.length : 0;
+  return rows.map((row) => {
+    const revenue = Number(row.revenue ?? 0);
+    const revenueTarget = Number(row.revenueTarget ?? 0);
+    const ticketCount = Number(row.ticketCount ?? 0);
+    const slaBreaches = Number(row.slaBreaches ?? 0);
+    const openComplaints = Number(row.openComplaints ?? 0);
+    const avgTatHours = Number(row.avgTatHours ?? 0);
+    const breachPercentage = ticketCount ? (slaBreaches / ticketCount) * 100 : 0;
     const revenueAchievement = revenueTarget ? (revenue / revenueTarget) * 100 : 0;
     return {
-      id: branch.id,
-      name: branch.name,
-      region: branch.region,
-      managerName: branch.managerName,
-      revenue,
-      revenueTarget,
-      revenueAchievement,
-      avgTatHours,
-      pendingCases: openTickets.length,
-      openComplaints,
-      slaBreaches: breached,
-      activeSlaBreaches: openTickets.filter((ticket) => ticket.slaBreached).length,
-      breachPercentage,
-      ticketCount: branch.tickets.length,
-      health: branchHealth({ id: branch.id, name: branch.name, breachPercentage, openComplaints, avgTatHours, revenueAchievement })
+      id: row.id, name: row.name, region: row.region, managerName: row.managerName,
+      revenue, revenueTarget, revenueAchievement, avgTatHours,
+      pendingCases: Number(row.pendingCases ?? 0), openComplaints, slaBreaches,
+      activeSlaBreaches: Number(row.activeSlaBreaches ?? 0), breachPercentage, ticketCount,
+      health: branchHealth({ id: row.id, name: row.name, breachPercentage, openComplaints, avgTatHours, revenueAchievement })
     };
   });
 }

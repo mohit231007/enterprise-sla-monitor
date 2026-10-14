@@ -30,32 +30,34 @@ async function main() {
   await prisma.branch.deleteMany();
 
   for (const [branchIndex, branchData] of branches.entries()) {
-    const branch = await prisma.branch.create({ data: branchData });
+    // Keep synthetic volume/risk controls out of the persisted Branch model.
+    const { baseRevenue, target, ticketVolume, breachRate, openComplaints, ...branchRecord } = branchData;
+    const branch = await prisma.branch.create({ data: branchRecord });
 
     const performance = Array.from({ length: 30 }, (_, index) => {
       const daysAgo = 29 - index;
       const weekdayMultiplier = [0.84, 1.03, 1.05, 1.04, 1.08, 0.98, 0.72][offsetDate(daysAgo).getDay()];
       const variation = 0.90 + pseudoRandom(branchIndex * 100 + index) * 0.20;
-      const revenue = Math.round(branchData.baseRevenue * weekdayMultiplier * variation);
+      const revenue = Math.round(baseRevenue * weekdayMultiplier * variation);
       return {
         branchId: branch.id,
         date: offsetDate(daysAgo),
         revenue,
-        revenueTarget: Math.round(branchData.target * weekdayMultiplier),
+        revenueTarget: Math.round(target * weekdayMultiplier),
         accountsOpened: Math.round(12 + pseudoRandom(index + branchIndex * 31) * 24),
         loansProcessed: Math.round(4 + pseudoRandom(index + branchIndex * 17) * 11)
       };
     });
     await prisma.dailyPerformance.createMany({ data: performance });
 
-    const tickets = Array.from({ length: branchData.ticketVolume }, (_, index) => {
+    const tickets = Array.from({ length: ticketVolume }, (_, index) => {
       const createdDaysAgo = Math.floor(pseudoRandom(branchIndex * 1000 + index) * 30);
       const createdAt = new Date(offsetDate(createdDaysAgo, 8 + (index % 9)));
-      const complaint = index < branchData.openComplaints || index % 3 === 0;
+      const complaint = index < openComplaints || index % 3 === 0;
       const type = complaint ? TicketType.Complaint : index % 2 === 0 ? TicketType.Exception : TicketType.Case;
-      const isForcedOpenComplaint = index < branchData.openComplaints;
+      const isForcedOpenComplaint = index < openComplaints;
       const open = isForcedOpenComplaint || (index % 11 === 0 && createdDaysAgo < 9);
-      const slaBreached = index % 100 < Math.round(branchData.breachRate * 100);
+      const slaBreached = index % 100 < Math.round(breachRate * 100);
       const turnaroundHours = slaBreached ? 50 + (index % 50) : 5 + (index % 28);
       return {
         branchId: branch.id,

@@ -30,5 +30,7 @@ it("deduplicates sheet titles and keeps hostile spreadsheet-like text inert", ()
  expect(xml).toContain('name="a b (3)"');
  expect(xml).toContain('t="inlineStr"');
  expect(xml).not.toContain('<f>');
- expect(xml).not.toContain("\u0001");
+ // Inspect XML elements, not arbitrary ZIP binary headers, which can contain 0x01.
+ const worksheetXml=(xml.match(/<worksheet\b[\s\S]*?<\/worksheet>/g)??[]).join("");
+ expect(worksheetXml).not.toContain("\u0001");
 });

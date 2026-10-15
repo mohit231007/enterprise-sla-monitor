@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { beforeAll, afterAll, describe, expect, it } from "vitest";
 
 // Only runs on the repository's ephemeral GitHub Actions PostgreSQL 16 service.
@@ -28,7 +28,7 @@ describe.runIf(enabled)("Axiomera finance and temporal SQL contract proof",()=>{
 
   it("keeps exact NUMERIC(20,4) money values across repeated fractional addition",async()=>{
     const rows=await prisma.$queryRawUnsafe<{total:unknown}[]>("SELECT (0.10::numeric(20,4)+0.20::numeric(20,4)) AS total");
-    expect(rows[0].total?.toString()).toBe("0.3000");
+    expect(new Prisma.Decimal(String(rows[0].total)).eq(new Prisma.Decimal("0.30"))).toBe(true);
   });
 
   it("rejects mismatched tenant and branch composite foreign keys",async()=>{

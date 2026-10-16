@@ -10,7 +10,7 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const money = /^(?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,4})?$/;
 export class Denied extends Error {}
 export class Conflict extends Error {}
-function canonical(x: unknown): string {
+export function canonical(x: unknown): string {
   if (Array.isArray(x)) return "[" + x.map(canonical).join(",") + "]";
   if(x !== null && typeof x === "object") {
     const o=x as Record<string,unknown>;
@@ -18,7 +18,7 @@ function canonical(x: unknown): string {
   }
   return JSON.stringify(x);
 }
-const hash = (x:unknown) => createHash("sha256").update(canonical(x)).digest("hex");
+export const hash = (x:unknown) => createHash("sha256").update(canonical(x)).digest("hex");
 export async function withTenant<T>(db:PrismaClient,p:Principal,fn:(tx:Tx)=>Promise<T>):Promise<T> {
   if(!uuid.test(p.tenantId)||!p.subject||p.subject.length>120) throw new Denied("invalid scoped identity");
   return db.$transaction(async tx=>{
@@ -26,13 +26,13 @@ export async function withTenant<T>(db:PrismaClient,p:Principal,fn:(tx:Tx)=>Prom
     return fn(tx);
   });
 }
-async function authorize(tx:Tx,p:Principal,allowed:string[]) {
+export async function authorize(tx:Tx,p:Principal,allowed:string[]) {
   const r=await tx.$queryRawUnsafe<{role:string}[]>(
     "SELECT role FROM axiomera_service_ci.memberships WHERE tenant_id=$1::uuid AND subject=$2 AND status='ACTIVE'",
     p.tenantId,p.subject);
   if(!r[0]||!allowed.includes(r[0].role))throw new Denied("not found");
 }
-async function event(tx:Tx,p:Principal,op:string,id:string) {
+export async function event(tx:Tx,p:Principal,op:string,id:string) {
   await tx.$executeRawUnsafe(
     "INSERT INTO axiomera_service_ci.events(tenant_id,actor,operation,subject_id) VALUES ($1::uuid,$2,$3,$4)",
     p.tenantId,p.subject,op,id);

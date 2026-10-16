@@ -1,5 +1,6 @@
 import { randomBytes, generateKeyPairSync, sign } from "node:crypto";
 import { createPgPilotHttp } from "./axiomera-pg-http.js";
+import { queueExport, claimExport, completeExport, processOneExport, fetchExport, renderExport } from "./axiomera-pg-export.js";
 import { PrismaClient } from "@prisma/client";
 import { beforeAll, afterAll, describe, expect, it } from "vitest";
 import { withTenant,ingest,freeze,approve,readReleased,Denied,Conflict } from "./axiomera-pg-service.js";
@@ -27,10 +28,11 @@ describe.runIf(enabled)("Axiomera restricted-role PostgreSQL application service
     "CREATE TABLE axiomera_service_ci.runs (tenant_id uuid NOT NULL,id uuid NOT NULL,dataset text NOT NULL,idem text NOT NULL,digest char(64) NOT NULL,received int NOT NULL,PRIMARY KEY(tenant_id,id),UNIQUE(tenant_id,dataset,idem))",
     "CREATE TABLE axiomera_service_ci.facts (tenant_id uuid NOT NULL,id bigint GENERATED ALWAYS AS IDENTITY,run_id uuid NOT NULL,dataset text NOT NULL,branch text NOT NULL,date date NOT NULL,amount numeric(20,4) NOT NULL,currency char(3) NOT NULL,source text NOT NULL,accepted_at timestamptz NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(tenant_id,id),UNIQUE(tenant_id,dataset,source),FOREIGN KEY(tenant_id,run_id) REFERENCES axiomera_service_ci.runs(tenant_id,id),FOREIGN KEY(tenant_id,branch) REFERENCES axiomera_service_ci.branches(tenant_id,branch))",
     "CREATE TABLE axiomera_service_ci.reports (tenant_id uuid NOT NULL,id uuid NOT NULL,maker text NOT NULL,checker text,status text NOT NULL,payload jsonb NOT NULL,digest char(64) NOT NULL,PRIMARY KEY(tenant_id,id), CHECK(checker IS NULL OR checker<>maker))",
+    "CREATE TABLE axiomera_service_ci.export_jobs (tenant_id uuid NOT NULL,id uuid NOT NULL,report_id uuid NOT NULL,requester text NOT NULL,idem text NOT NULL,format text NOT NULL CHECK(format IN ('CSV','JSON')),state text NOT NULL DEFAULT 'QUEUED' CHECK(state IN ('QUEUED','LEASED','DONE')),attempts int NOT NULL DEFAULT 0,generation int NOT NULL DEFAULT 0,lease_owner text,lease_until timestamptz,artifact bytea,artifact_sha256 char(64),artifact_length int,created_at timestamptz NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(tenant_id,id),FOREIGN KEY(tenant_id,report_id) REFERENCES axiomera_service_ci.reports(tenant_id,id),UNIQUE(tenant_id,requester,report_id,idem))",
     "CREATE TABLE axiomera_service_ci.events (tenant_id uuid NOT NULL, id bigint GENERATED ALWAYS AS IDENTITY,actor text NOT NULL,operation text NOT NULL,subject_id text NOT NULL,PRIMARY KEY(tenant_id,id))"
    ];
    for(const stmt of ddl)await admin.$executeRawUnsafe(stmt);
-   for(const table of ["memberships","branches","runs","facts","reports","events"]){
+   for(const table of ["memberships","branches","runs","facts","reports","export_jobs","events"]){
      await admin.$executeRawUnsafe("ALTER TABLE axiomera_service_ci."+table+" ENABLE ROW LEVEL SECURITY");
      await admin.$executeRawUnsafe("ALTER TABLE axiomera_service_ci."+table+" FORCE ROW LEVEL SECURITY");
      await admin.$executeRawUnsafe("CREATE POLICY scope ON axiomera_service_ci."+table+
@@ -39,9 +41,10 @@ describe.runIf(enabled)("Axiomera restricted-role PostgreSQL application service
    }
    await admin.$executeRawUnsafe("GRANT USAGE ON SCHEMA axiomera_service_ci TO axiomera_service_runtime");
    await admin.$executeRawUnsafe("GRANT SELECT ON ALL TABLES IN SCHEMA axiomera_service_ci TO axiomera_service_runtime");
-   for(const table of ["runs","facts","reports","events"])
+   for(const table of ["runs","facts","reports","export_jobs","events"])
      await admin.$executeRawUnsafe("GRANT INSERT ON axiomera_service_ci."+table+" TO axiomera_service_runtime");
    await admin.$executeRawUnsafe("GRANT UPDATE(status,checker) ON axiomera_service_ci.reports TO axiomera_service_runtime");
+   await admin.$executeRawUnsafe("GRANT UPDATE(state,attempts,generation,lease_owner,lease_until,artifact,artifact_sha256,artifact_length) ON axiomera_service_ci.export_jobs TO axiomera_service_runtime");
    await admin.$executeRawUnsafe("GRANT USAGE ON ALL SEQUENCES IN SCHEMA axiomera_service_ci TO axiomera_service_runtime");
    await admin.$executeRawUnsafe("INSERT INTO axiomera_service_ci.branches VALUES ('"+A+"','CENTRAL'),('"+B+"','CENTRAL')");
    await admin.$executeRawUnsafe("INSERT INTO axiomera_service_ci.memberships VALUES "+
@@ -49,7 +52,8 @@ describe.runIf(enabled)("Axiomera restricted-role PostgreSQL application service
      "('"+A+"','carol','REVIEWER','ACTIVE'),('"+A+"','aud','AUDITOR','ACTIVE'),"+
      "('"+A+"','revoked','ANALYST','REVOKED'),"+
      "('"+B+"','alice','INGESTOR','ACTIVE'),('"+B+"','bob','ANALYST','ACTIVE'),"+
-     "('"+B+"','carol','REVIEWER','ACTIVE'),('"+B+"','aud','AUDITOR','ACTIVE')");
+     "('"+B+"','carol','REVIEWER','ACTIVE'),('"+B+"','aud','AUDITOR','ACTIVE'),"+
+     "('"+A+"','worker','WORKER','ACTIVE'),('"+B+"','worker','WORKER','ACTIVE')");
    const u=new URL(dsn);u.username="axiomera_service_runtime";u.password=password;
    runtime=new PrismaClient({datasources:{db:{url:u.toString()}}});
    const roles=await runtime.$queryRawUnsafe<{rolsuper:boolean;rolbypassrls:boolean}[]>(

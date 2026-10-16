@@ -50,12 +50,12 @@ export async function queueExport(db:PrismaClient,p:Principal,reportId:string,id
      p.tenantId,reportId);
    validatedReport(reports[0]);
    await tx.$queryRawUnsafe("SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended($1,0))",
-     "export:"+p.tenantId+":"+p.subject+":"+reportId+":"+idempotencyKey);
-   const jobs=await tx.$queryRawUnsafe<{id:string;format:string}[]>(
-     "SELECT id,format FROM axiomera_service_ci.export_jobs WHERE tenant_id=$1::uuid AND requester=$2 AND report_id=$3::uuid AND idem=$4",
-     p.tenantId,p.subject,reportId,idempotencyKey);
+     "export:"+p.tenantId+":"+p.subject+":"+idempotencyKey);
+   const jobs=await tx.$queryRawUnsafe<{id:string;report_id:string;format:string}[]>(
+     "SELECT id,report_id,format FROM axiomera_service_ci.export_jobs WHERE tenant_id=$1::uuid AND requester=$2 AND idem=$3",
+     p.tenantId,p.subject,idempotencyKey);
    if(jobs[0]){
-     if(jobs[0].format!==format)throw new Conflict("export idempotency mismatch");
+     if(jobs[0].format!==format||jobs[0].report_id!==reportId.toLowerCase())throw new Conflict("export idempotency mismatch");
      return {id:jobs[0].id,replayed:true};
    }
    const id=randomUUID();

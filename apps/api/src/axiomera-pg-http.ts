@@ -48,7 +48,7 @@ export function createPgPilotHttp(db:PrismaClient,trust:Trust){
  function handle(fn:(req:express.Request,p:Principal)=>Promise<unknown>,status=200){
   return async(req:express.Request,res:express.Response)=>{
     let principal:Principal;
-    try{principal=authenticate(req.header("authorization"),req.params.tenant,trust);}
+    try{if(typeof req.params.tenant!=="string")throw new Error("invalid tenant");principal=authenticate(req.header("authorization"),req.params.tenant,trust);}
     catch{res.status(401).json({error:"invalid token or tenant claim"});return;}
     try{const result=await fn(req,principal);res.setHeader("Cache-Control","no-store");res.status(status).json(result);}
     catch(e){
@@ -69,7 +69,7 @@ export function createPgPilotHttp(db:PrismaClient,trust:Trust){
    if(!req.body||typeof req.body.dataset!=="string")throw new Denied();
    return freeze(db,p,req.body.dataset);
  },201));
- app.post("/v1/tenants/:tenant/reports/:id/approve",handle(async(req,p)=>approve(db,p,req.params.id)));
- app.get("/v1/tenants/:tenant/reports/:id",handle(async(req,p)=>readReleased(db,p,req.params.id)));
+ app.post("/v1/tenants/:tenant/reports/:id/approve",handle(async(req,p)=>{if(typeof req.params.id!=="string")throw new Denied();return approve(db,p,req.params.id);}));
+ app.get("/v1/tenants/:tenant/reports/:id",handle(async(req,p)=>{if(typeof req.params.id!=="string")throw new Denied();return readReleased(db,p,req.params.id);}));
  return app;
 }

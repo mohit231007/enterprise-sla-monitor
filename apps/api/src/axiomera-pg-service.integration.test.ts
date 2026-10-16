@@ -28,7 +28,7 @@ describe.runIf(enabled)("Axiomera restricted-role PostgreSQL application service
     "CREATE TABLE axiomera_service_ci.runs (tenant_id uuid NOT NULL,id uuid NOT NULL,dataset text NOT NULL,idem text NOT NULL,digest char(64) NOT NULL,received int NOT NULL,PRIMARY KEY(tenant_id,id),UNIQUE(tenant_id,dataset,idem))",
     "CREATE TABLE axiomera_service_ci.facts (tenant_id uuid NOT NULL,id bigint GENERATED ALWAYS AS IDENTITY,run_id uuid NOT NULL,dataset text NOT NULL,branch text NOT NULL,date date NOT NULL,amount numeric(20,4) NOT NULL,currency char(3) NOT NULL,source text NOT NULL,accepted_at timestamptz NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(tenant_id,id),UNIQUE(tenant_id,dataset,source),FOREIGN KEY(tenant_id,run_id) REFERENCES axiomera_service_ci.runs(tenant_id,id),FOREIGN KEY(tenant_id,branch) REFERENCES axiomera_service_ci.branches(tenant_id,branch))",
     "CREATE TABLE axiomera_service_ci.reports (tenant_id uuid NOT NULL,id uuid NOT NULL,maker text NOT NULL,checker text,status text NOT NULL,payload jsonb NOT NULL,digest char(64) NOT NULL,PRIMARY KEY(tenant_id,id), CHECK(checker IS NULL OR checker<>maker))",
-    "CREATE TABLE axiomera_service_ci.export_jobs (tenant_id uuid NOT NULL,id uuid NOT NULL,report_id uuid NOT NULL,requester text NOT NULL,idem text NOT NULL,format text NOT NULL CHECK(format IN ('CSV','JSON')),state text NOT NULL DEFAULT 'QUEUED' CHECK(state IN ('QUEUED','LEASED','DONE')),attempts int NOT NULL DEFAULT 0,generation int NOT NULL DEFAULT 0,lease_owner text,lease_until timestamptz,artifact bytea,artifact_sha256 char(64),artifact_length int,created_at timestamptz NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(tenant_id,id),FOREIGN KEY(tenant_id,report_id) REFERENCES axiomera_service_ci.reports(tenant_id,id),UNIQUE(tenant_id,requester,idem))",
+    "CREATE TABLE axiomera_service_ci.export_jobs (tenant_id uuid NOT NULL,id uuid NOT NULL,report_id uuid NOT NULL,requester text NOT NULL,idem text NOT NULL,format text NOT NULL CHECK(format IN ('CSV','JSON')),state text NOT NULL DEFAULT 'QUEUED' CHECK(state IN ('QUEUED','LEASED','DONE','FAILED')),attempts int NOT NULL DEFAULT 0,generation int NOT NULL DEFAULT 0,lease_owner text,lease_until timestamptz,artifact bytea,artifact_sha256 char(64),artifact_length int,created_at timestamptz NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(tenant_id,id),FOREIGN KEY(tenant_id,report_id) REFERENCES axiomera_service_ci.reports(tenant_id,id),UNIQUE(tenant_id,requester,idem))",
     "CREATE TABLE axiomera_service_ci.events (tenant_id uuid NOT NULL, id bigint GENERATED ALWAYS AS IDENTITY,actor text NOT NULL,operation text NOT NULL,subject_id text NOT NULL,PRIMARY KEY(tenant_id,id))"
    ];
    for(const stmt of ddl)await admin.$executeRawUnsafe(stmt);
@@ -263,6 +263,24 @@ describe.runIf(enabled)("Axiomera restricted-role PostgreSQL application service
    const pending=await freeze(db(),p(A,"bob"),"sales");
    await expect(queueExport(db(),p(A,"aud"),pending.id,"blocked-export-key-001","CSV")).rejects.toBeInstanceOf(Denied);
    expect(()=>renderExport({lines:[{branch:"=HYPERLINK",currency:"INR",amount:"1.0"}]},"CSV")).toThrow();
+ });
+
+
+ it("marks a repeatedly crashed export as FAILED after three expired leases",async()=>{
+   const job=await queueExport(db(),p(A,"aud"),reportId,"exhausted-key-001","CSV");
+   for(let n=1;n<=3;n++){
+     const lease=await claimExport(db(),p(A,"worker"),"crasher-"+n);
+     expect(lease?.id).toBe(job.id);
+     expect(lease?.attempts).toBe(n);
+     await admin.$executeRawUnsafe(
+       "UPDATE axiomera_service_ci.export_jobs SET lease_until=clock_timestamp()-interval '1 second' "+
+       "WHERE tenant_id=$1::uuid AND id=$2::uuid",A,job.id);
+   }
+   expect(await claimExport(db(),p(A,"worker"),"crasher-4")).toBeNull();
+   const final=await withTenant(db(),p(A,"worker"),tx=>tx.$queryRawUnsafe<{state:string;attempts:number}[]>(
+      "SELECT state,attempts FROM axiomera_service_ci.export_jobs WHERE tenant_id=$1::uuid AND id=$2::uuid",A,job.id));
+   expect(final).toEqual([{state:"FAILED",attempts:3}]);
+   await expect(fetchExport(db(),p(A,"aud"),job.id)).rejects.toBeInstanceOf(Denied);
  });
 
 });

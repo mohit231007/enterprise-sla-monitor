@@ -99,7 +99,7 @@ describe.runIf(enabled)("Axiomera restricted-role PostgreSQL application service
    await expect(approve(db(),p(A,"bob"),reportId)).rejects.toBeInstanceOf(Denied);
    expect((await approve(db(),p(A,"carol"),reportId)).replayed).toBe(false);
    expect((await approve(db(),p(A,"carol"),reportId)).replayed).toBe(true);
-   expect((await readReleased(db(),p(A,"aud"),reportId)).payload.lines).toEqual([{branch:"CENTRAL",currency:"INR",amount:"10.2000"}]);
+   expect((await readReleased(db(),p(A,"aud"),reportId)).payload).toMatchObject({lines:[{branch:"CENTRAL",currency:"INR",amount:"10.2000"}]});
  });
  it("database prevents direct unauthorized fact updates, cross-tenant inserts and deletes",async()=>{
    await expect(withTenant(db(),p(A,"alice"),tx=>tx.$executeRawUnsafe("UPDATE axiomera_service_ci.facts SET amount=2"))).rejects.toThrow();

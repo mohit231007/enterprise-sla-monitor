@@ -6,7 +6,9 @@
     "dev": "node ../../node_modules/next/dist/bin/next dev",
     "build": "node ../../node_modules/next/dist/bin/next build",
     "start": "node ../../node_modules/next/dist/bin/next start",
-    "lint": "node ../../node_modules/next/dist/bin/next lint"
+    "lint": "node ../../node_modules/next/dist/bin/next lint",
+    "test": "node ../../node_modules/vitest/vitest.mjs run",
+    "prebuild": "npm run test"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.0.8",
@@ -20,6 +22,7 @@
     "@types/node": "^22.13.5",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.7"
   }
 }

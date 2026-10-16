@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LocalImmutableObjectStore, makeObjectKey } from "./axiomera-object-store.js";
 import { fetchObjectExport, processOneObjectExport } from "./axiomera-pg-object-exports.js";
+import { S3PolicyObjectStore, type S3Put, type S3Get } from "./axiomera-s3-policy-store.js";
 import { createPgPilotHttp } from "./axiomera-pg-http.js";
 import { queueExport, claimExport, completeExport, processOneExport, fetchExport, renderExport } from "./axiomera-pg-export.js";
 import { PrismaClient } from "@prisma/client";
@@ -347,6 +348,50 @@ describe.runIf(enabled)("Axiomera restricted-role PostgreSQL application service
      await symlink(join(dir,key),join(dir,linkKey));
      await expect(store.read(linkKey)).rejects.toThrow();
    }finally{await rm(dir,{recursive:true,force:true});}
+ });
+
+
+ it("integrates the PostgreSQL worker with injected S3 transport and no database export bytes",async()=>{
+   const account="123456789012";
+   const kms="arn:aws:kms:ap-south-1:123456789012:key/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+   const objects=new Map<string,Uint8Array>();
+   const transport={
+     putObject:async (request:S3Put)=>{
+       expect(request.ExpectedBucketOwner).toBe(account);
+       expect(request.ServerSideEncryption).toBe("aws:kms");
+       expect(request.SSEKMSKeyId).toBe(kms);
+       expect(request.ObjectLockMode).toBe("COMPLIANCE");
+       expect(request.IfNoneMatch).toBe("*");
+       const address=request.Bucket+"/"+request.Key;
+       if(objects.has(address))throw Object.assign(new Error("exists"),{name:"PreconditionFailed",$metadata:{httpStatusCode:412}});
+       objects.set(address,Uint8Array.from(request.Body));
+     },
+     getObject:async (request:S3Get)=>{
+       expect(request.ExpectedBucketOwner).toBe(account);
+       const bytes=objects.get(request.Bucket+"/"+request.Key);
+       if(!bytes)throw new Error("object absent");
+       return {Body:bytes,ServerSideEncryption:"aws:kms",SSEKMSKeyId:kms};
+     }
+   };
+   const store=new S3PolicyObjectStore(transport,{
+     bucket:"synthetic-bank-evidence",expectedAccountId:account,kmsKeyArn:kms,
+     keyPrefix:"private/axiomera",retentionUntil:new Date(Date.now()+31*86400000)
+   });
+   const task=await queueExport(db(),p(A,"aud"),reportId,"s3-integration-key-001","CSV");
+   const output=await processOneObjectExport(db(),p(A,"worker"),"worker-s3-fixture",store);
+   expect(output?.id).toBe(task.id);
+   const result=await fetchObjectExport(db(),p(A,"aud"),task.id,store);
+   expect(result.body.toString("utf8")).toContain('"CENTRAL","INR"');
+   const metadata=await withTenant(db(),p(A,"aud"),tx=>tx.$queryRawUnsafe<
+     {artifact:Uint8Array|null;object_key:string}[]>(
+     "SELECT artifact,object_key FROM axiomera_service_ci.export_jobs WHERE tenant_id=$1::uuid AND id=$2::uuid",A,task.id));
+   expect(metadata[0].artifact).toBeNull();
+   expect(metadata[0].object_key).toContain(".bin");
+   expect(objects.size).toBe(1);
+   await expect(fetchObjectExport(db(),p(B,"aud"),task.id,store)).rejects.toBeInstanceOf(Denied);
+   const k=Array.from(objects.keys())[0];
+   objects.set(k,Buffer.from("tampered"));
+   await expect(fetchObjectExport(db(),p(A,"aud"),task.id,store)).rejects.toBeInstanceOf(Conflict);
  });
 
 });

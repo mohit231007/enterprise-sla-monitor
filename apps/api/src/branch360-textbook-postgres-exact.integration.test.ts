@@ -50,10 +50,10 @@ describe.runIf(enabled)("verbatim Branch360 PostgreSQL16 manuscript blocks, disp
   await scoped(async tx=>{
    await tx.$executeRawUnsafe("CREATE TABLE daily_performance(branch_id int,date timestamp,revenue numeric(20,4),revenue_target numeric(20,4))");
    await tx.$executeRawUnsafe("CREATE TABLE operations_tickets(branch_id int,created_at timestamp,status text,sla_breached boolean)");
-   await tx.$executeRawUnsafe("CREATE TABLE branch_revenue_fact(tenant_id uuid,region text,branch_id int,revenue numeric(20,4),business_date date)");
+   await tx.$executeRawUnsafe("CREATE TABLE branch_revenue_fact(tenant_id text,region text,branch_id int,revenue numeric(20,4),business_date date)");
    await tx.$executeRawUnsafe("INSERT INTO daily_performance VALUES (1,'2026-10-01',100,120),(1,'2026-10-02',150,160),(2,'2026-11-01',80,100)");
    await tx.$executeRawUnsafe("INSERT INTO operations_tickets VALUES (1,'2026-10-01','Open',true),(1,'2026-10-02','Closed',true),(2,'2026-10-01','Open',false),(2,'2026-09-10','Open',false)");
-   await tx.$executeRawUnsafe("INSERT INTO branch_revenue_fact VALUES ($1::uuid,'N',1,100,'2026-10-01'),($1::uuid,'N',2,150,'2026-10-02'),($2::uuid,'S',1,9000,'2026-10-01')",A,B);
+   await tx.$executeRawUnsafe("INSERT INTO branch_revenue_fact VALUES ($1::text,'N',1,100,'2026-10-01'),($1::text,'N',2,150,'2026-10-02'),($2::text,'S',1,9000,'2026-10-01')",A,B);
   });
  },30000);
  afterAll(async()=>{

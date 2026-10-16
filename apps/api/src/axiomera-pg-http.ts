@@ -3,6 +3,8 @@ import { createPublicKey, verify as verifySignature } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { approve, Conflict, Denied, freeze, ingest, readReleased, type Principal } from "./axiomera-pg-service.js";
 import { fetchExport, queueExport } from "./axiomera-pg-export.js";
+import { fetchObjectExport } from "./axiomera-pg-object-exports.js";
+import type { ImmutableObjectStore } from "./axiomera-object-store.js";
 
 /** Non-production, isolated HTTP adapter. Never mount into the legacy public server by default.
  * A bank IAM team must replace this pinned-key pilot with approved OIDC rotation/revocation.
@@ -40,7 +42,7 @@ function authenticate(bearer:string|undefined,tenant:string,trust:Trust):Princip
     claims.tenant_id!==tenant)throw new Error("invalid identity claims");
  return {subject:claims.sub,tenantId:tenant};
 }
-export function createPgPilotHttp(db:PrismaClient,trust:Trust){
+export function createPgPilotHttp(db:PrismaClient,trust:Trust,objects?:ImmutableObjectStore){
  if(!trust.issuer||!trust.audience||!trust.jwks.keys.length)throw new Error("pinned trust material required");
  const app=express();
  app.disable("x-powered-by");
@@ -77,6 +79,28 @@ export function createPgPilotHttp(db:PrismaClient,trust:Trust){
    if(typeof req.params.id!=="string"||!req.body||!["CSV","JSON"].includes(req.body.format))throw new Denied();
    return queueExport(db,p,req.params.id,req.header("idempotency-key")||"",req.body.format);
  },202));
+
+ app.get("/v1/tenants/:tenant/exports/:id/object-download",async(req,res)=>{
+   if(!objects){res.status(404).json({error:"object adapter not configured"});return;}
+   let p:Principal;
+   try{
+     if(typeof req.params.tenant!=="string")throw new Error("tenant");
+     p=authenticate(req.header("authorization"),req.params.tenant,trust);
+   }catch{res.status(401).json({error:"invalid token or tenant claim"});return;}
+   try{
+     if(typeof req.params.id!=="string")throw new Denied();
+     const result=await fetchObjectExport(db,p,req.params.id,objects);
+     res.setHeader("Cache-Control","private, no-store");
+     res.setHeader("X-Content-Type-Options","nosniff");
+     res.setHeader("X-Artifact-SHA256",result.sha256);
+     res.type(result.mime).status(200).send(result.body);
+   }catch(error){
+     if(error instanceof Denied){res.status(404).json({error:"not found"});return;}
+     if(error instanceof Conflict){res.status(409).json({error:"object verification failed"});return;}
+     res.status(500).json({error:"internal server error"});
+   }
+ });
+
  app.get("/v1/tenants/:tenant/exports/:id/download",async(req,res)=>{
    let principal:Principal;
    try {

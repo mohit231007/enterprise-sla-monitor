@@ -151,7 +151,7 @@ describe.runIf(active)("verbatim manuscript PostgreSQL blocks: scope, time, inde
   expect(Number(rows[0].count)).toBe(1);
  });
  it("CODE-007: exact DDL enforces tenant-and-endpoint idempotency uniqueness",async()=>{
-  await scoped(tx=>tx.$executeRawUnsafe(blocks["CODE-007"].sql.split(";")[0]));
+  await scoped(tx=>tx.$executeRawUnsafe(blocks["CODE-007"].sql.slice(blocks["CODE-007"].sql.indexOf("CREATE TABLE"),blocks["CODE-007"].sql.indexOf(");")+2)));
   const exists=await scoped(tx=>tx.$queryRawUnsafe<{present:string|null}[]>("SELECT to_regclass('textbook_v23_ci.request_idempotency')::text AS present"));
   expect(exists[0].present).toContain("request_idempotency");
   await scoped(tx=>tx.$executeRawUnsafe("INSERT INTO textbook_v23_ci.request_idempotency(tenant_id,endpoint_key,idempotency_key,request_sha256) VALUES ($1::uuid,'upload','key','a')",A));

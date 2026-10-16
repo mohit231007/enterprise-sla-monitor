@@ -25,7 +25,7 @@ describe.runIf(enabled)("Axiomera restricted-role PostgreSQL application service
     "CREATE TABLE axiomera_service_ci.memberships (tenant_id uuid NOT NULL, subject text NOT NULL, role text NOT NULL, status text NOT NULL, PRIMARY KEY(tenant_id,subject))",
     "CREATE TABLE axiomera_service_ci.branches (tenant_id uuid NOT NULL, branch text NOT NULL, PRIMARY KEY(tenant_id,branch))",
     "CREATE TABLE axiomera_service_ci.runs (tenant_id uuid NOT NULL,id uuid NOT NULL,dataset text NOT NULL,idem text NOT NULL,digest char(64) NOT NULL,received int NOT NULL,PRIMARY KEY(tenant_id,id),UNIQUE(tenant_id,dataset,idem))",
-    "CREATE TABLE axiomera_service_ci.facts (tenant_id uuid NOT NULL,id bigint GENERATED ALWAYS AS IDENTITY,run_id uuid NOT NULL,dataset text NOT NULL,branch text NOT NULL,date date NOT NULL,amount numeric(20,4) NOT NULL,currency char(3) NOT NULL,source text NOT NULL,PRIMARY KEY(tenant_id,id),UNIQUE(tenant_id,dataset,source),FOREIGN KEY(tenant_id,run_id) REFERENCES axiomera_service_ci.runs(tenant_id,id),FOREIGN KEY(tenant_id,branch) REFERENCES axiomera_service_ci.branches(tenant_id,branch))",
+    "CREATE TABLE axiomera_service_ci.facts (tenant_id uuid NOT NULL,id bigint GENERATED ALWAYS AS IDENTITY,run_id uuid NOT NULL,dataset text NOT NULL,branch text NOT NULL,date date NOT NULL,amount numeric(20,4) NOT NULL,currency char(3) NOT NULL,source text NOT NULL,accepted_at timestamptz NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(tenant_id,id),UNIQUE(tenant_id,dataset,source),FOREIGN KEY(tenant_id,run_id) REFERENCES axiomera_service_ci.runs(tenant_id,id),FOREIGN KEY(tenant_id,branch) REFERENCES axiomera_service_ci.branches(tenant_id,branch))",
     "CREATE TABLE axiomera_service_ci.reports (tenant_id uuid NOT NULL,id uuid NOT NULL,maker text NOT NULL,checker text,status text NOT NULL,payload jsonb NOT NULL,digest char(64) NOT NULL,PRIMARY KEY(tenant_id,id), CHECK(checker IS NULL OR checker<>maker))",
     "CREATE TABLE axiomera_service_ci.events (tenant_id uuid NOT NULL, id bigint GENERATED ALWAYS AS IDENTITY,actor text NOT NULL,operation text NOT NULL,subject_id text NOT NULL,PRIMARY KEY(tenant_id,id))"
    ];
@@ -145,7 +145,7 @@ describe.runIf(enabled)("Axiomera restricted-role PostgreSQL application service
    try{
      const uploader=makeJwt(A,"alice"),analyst=makeJwt(A,"bob"),reviewer=makeJwt(A,"carol"),auditor=makeJwt(A,"aud");
      const upload=await call("POST",A,"/ingestions",uploader,{dataset:"sales",rows:[
-       {branch:"CENTRAL",date:"2026-10-15",amount:"0.1000",currency:"INR",source:"SRC:RED:HTTP001"}]},"http-idem-1234");
+       {branch:"CENTRAL",date:"2026-10-16",amount:"0.1000",currency:"INR",source:"SRC:RED:HTTP001"}]},"http-idem-1234");
      expect(upload.status).toBe(201);
      const draft=await call("POST",A,"/reports",analyst,{dataset:"sales"});
      expect(draft.status).toBe(201);
@@ -167,6 +167,30 @@ describe.runIf(enabled)("Axiomera restricted-role PostgreSQL application service
    } finally {
      await new Promise<void>((resolve,reject)=>server.close(e=>e?reject(e):resolve()));
    }
+ });
+
+
+ it("freezes accepted-time cutoffs and selects latest revision per business-day key",async()=>{
+   const priorCutoff=new Date().toISOString();
+   // Ensure a future ingestion cannot be included in the earlier accepted-time snapshot.
+   const correction=await ingest(db(),p(A,"alice"),"sales",[
+     {branch:"CENTRAL",date:"2026-10-15",amount:"99.5000",currency:"INR",source:"SRC:RED:CORR002"}
+   ],"revision-idem-1234");
+   expect(correction.replayed).toBe(false);
+   const historical=await freeze(db(),p(A,"bob"),"sales",priorCutoff);
+   const updated=await freeze(db(),p(A,"bob"),"sales",new Date(Date.now()+60000).toISOString());
+   expect(historical.payload.lines).toEqual([{branch:"CENTRAL",currency:"INR",amount:"10.3000"}]);
+   expect(updated.payload.lines).toEqual([{branch:"CENTRAL",currency:"INR",amount:"99.6000"}]);
+   expect(updated.digest).not.toBe(historical.digest);
+ });
+ it("rejects impossible business dates and duplicate logical keys in one batch",async()=>{
+   await expect(ingest(db(),p(A,"alice"),"sales",[
+     {branch:"CENTRAL",date:"2026-02-30",amount:"10.00",currency:"INR",source:"SRC:BAD:DATE"}
+   ],"bad-date-idem-1")).rejects.toBeInstanceOf(Denied);
+   await expect(ingest(db(),p(A,"alice"),"sales",[
+     {branch:"CENTRAL",date:"2026-10-17",amount:"10.00",currency:"INR",source:"SRC:DUPE:001"},
+     {branch:"CENTRAL",date:"2026-10-17",amount:"11.00",currency:"INR",source:"SRC:DUPE:002"}
+   ],"bad-duplicate-1")).rejects.toBeInstanceOf(Denied);
  });
 
 });

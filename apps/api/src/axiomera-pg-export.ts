@@ -49,6 +49,8 @@ export async function queueExport(db:PrismaClient,p:Principal,reportId:string,id
      "SELECT status,payload,digest FROM axiomera_service_ci.reports WHERE tenant_id=$1::uuid AND id=$2::uuid FOR SHARE",
      p.tenantId,reportId);
    validatedReport(reports[0]);
+   await tx.$queryRawUnsafe("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+     "export:"+p.tenantId+":"+p.subject+":"+reportId+":"+idempotencyKey);
    const jobs=await tx.$queryRawUnsafe<{id:string;format:string}[]>(
      "SELECT id,format FROM axiomera_service_ci.export_jobs WHERE tenant_id=$1::uuid AND requester=$2 AND report_id=$3::uuid AND idem=$4",
      p.tenantId,p.subject,reportId,idempotencyKey);

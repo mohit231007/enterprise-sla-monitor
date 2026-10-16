@@ -159,6 +159,20 @@ describe.runIf(enabled)("Axiomera restricted-role PostgreSQL application service
      expect((await call("POST",A,"/reports/"+draft.body.id+"/approve",reviewer)).status).toBe(200);
      const released=await call("GET",A,"/reports/"+draft.body.id,auditor);
      expect(released.status).toBe(200);expect(released.body.payload.lines).toEqual(draft.body.payload.lines);
+
+     // Full HTTP -> PostgreSQL job -> isolated worker -> authorized download.
+     const enqueued=await call("POST",A,"/reports/"+draft.body.id+"/exports",auditor,{format:"CSV"},"http-export-idem-001");
+     expect(enqueued.status).toBe(202);
+     expect((await processOneExport(db(),p(A,"worker"),"worker-http-1"))?.id).toBe(enqueued.body.id);
+     const download=await fetch(base+A+"/exports/"+enqueued.body.id+"/download",{headers:{Authorization:"Bearer "+auditor}});
+     expect(download.status).toBe(200);
+     const downloaded=Buffer.from(await download.arrayBuffer());
+     expect(downloaded.toString("utf8")).toContain('"CENTRAL","INR","10.3000"');
+     expect(download.headers.get("x-artifact-sha256")).toHaveLength(64);
+     const deniedOtherTenant=await fetch(base+B+"/exports/"+enqueued.body.id+"/download",{
+       headers:{Authorization:"Bearer "+makeJwt(B,"aud")}});
+     expect(deniedOtherTenant.status).toBe(404);
+
      expect((await call("GET",B,"/reports/"+draft.body.id,auditor)).status).toBe(401);
      expect((await call("GET",B,"/reports/"+draft.body.id,makeJwt(B,"aud"))).status).toBe(404);
      expect((await call("GET",A,"/reports/"+draft.body.id,makeJwt(A,"revoked"))).status).toBe(404);
@@ -195,6 +209,57 @@ describe.runIf(enabled)("Axiomera restricted-role PostgreSQL application service
      {branch:"CENTRAL",date:"2026-10-17",amount:"10.00",currency:"INR",source:"SRC:DUPE:001"},
      {branch:"CENTRAL",date:"2026-10-17",amount:"11.00",currency:"INR",source:"SRC:DUPE:002"}
    ],"bad-duplicate-1")).rejects.toBeInstanceOf(Denied);
+ });
+
+
+ it("queues idempotently and rejects a conflicting export format for the same key",async()=>{
+   const a=await queueExport(db(),p(A,"aud"),reportId,"stable-export-key-001","CSV");
+   const b=await queueExport(db(),p(A,"aud"),reportId,"stable-export-key-001","CSV");
+   expect(a.replayed).toBe(false);expect(b.replayed).toBe(true);expect(b.id).toBe(a.id);
+   await expect(queueExport(db(),p(A,"aud"),reportId,"stable-export-key-001","JSON")).rejects.toBeInstanceOf(Conflict);
+   expect((await processOneExport(db(),p(A,"worker"),"worker-batch-1"))?.id).toBe(a.id);
+   const got=await fetchExport(db(),p(A,"aud"),a.id);
+   expect(got.body.toString("utf8")).toContain('"CENTRAL","INR"');
+   await expect(fetchExport(db(),p(B,"aud"),a.id)).rejects.toBeInstanceOf(Denied);
+ });
+ it("prevents double claim and rejects stale fenced workers after lease expiration",async()=>{
+   const queued=await queueExport(db(),p(A,"aud"),reportId,"fenced-export-key-001","JSON");
+   const older=await claimExport(db(),p(A,"worker"),"worker-old");
+   expect(older?.id).toBe(queued.id);
+   const nothing=await claimExport(db(),p(A,"worker"),"worker-rival");
+   expect(nothing).toBeNull();
+   // Simulates worker crash / 30-second lease expiry using fixture owner.
+   await admin.$executeRawUnsafe(
+     "UPDATE axiomera_service_ci.export_jobs SET lease_until=clock_timestamp()-interval '1 second' WHERE tenant_id=$1::uuid AND id=$2::uuid",A,queued.id);
+   const newer=await claimExport(db(),p(A,"worker"),"worker-new");
+   expect(newer?.id).toBe(queued.id);
+   expect(newer?.generation).toBe((older?.generation??0)+1);
+   const released=await readReleased(db(),p(A,"aud"),reportId);
+   await expect(completeExport(db(),p(A,"worker"),older!,renderExport(released.payload,"JSON"))).rejects.toBeInstanceOf(Conflict);
+   await completeExport(db(),p(A,"worker"),newer!,renderExport(released.payload,"JSON"));
+   expect((await fetchExport(db(),p(A,"aud"),queued.id)).mime).toBe("application/json");
+ });
+ it("detects corrupted artifact bytes and revoked readers on download",async()=>{
+   const job=await queueExport(db(),p(A,"aud"),reportId,"tamper-export-key-001","CSV");
+   await processOneExport(db(),p(A,"worker"),"worker-tamper");
+   expect((await fetchExport(db(),p(A,"aud"),job.id)).body.length).toBeGreaterThan(10);
+   await admin.$executeRawUnsafe(
+      "UPDATE axiomera_service_ci.export_jobs SET artifact=decode('00','hex') WHERE tenant_id=$1::uuid AND id=$2::uuid",A,job.id);
+   await expect(fetchExport(db(),p(A,"aud"),job.id)).rejects.toBeInstanceOf(Denied);
+   // Hash-correct length but malicious content must still be detected by SHA-256 and reference bytes.
+   await admin.$executeRawUnsafe(
+      "UPDATE axiomera_service_ci.export_jobs SET artifact=repeat('x',artifact_length)::bytea WHERE tenant_id=$1::uuid AND id=$2::uuid",A,job.id);
+   await expect(fetchExport(db(),p(A,"aud"),job.id)).rejects.toBeInstanceOf(Conflict);
+   await admin.$executeRawUnsafe(
+      "UPDATE axiomera_service_ci.memberships SET status='REVOKED' WHERE tenant_id=$1::uuid AND subject='aud'",A);
+   await expect(fetchExport(db(),p(A,"aud"),job.id)).rejects.toBeInstanceOf(Denied);
+   await admin.$executeRawUnsafe(
+      "UPDATE axiomera_service_ci.memberships SET status='ACTIVE' WHERE tenant_id=$1::uuid AND subject='aud'",A);
+ });
+ it("rejects unreleased reports and formula-like exported branch names",async()=>{
+   const pending=await freeze(db(),p(A,"bob"),"sales");
+   await expect(queueExport(db(),p(A,"aud"),pending.id,"blocked-export-key-001","CSV")).rejects.toBeInstanceOf(Denied);
+   expect(()=>renderExport({lines:[{branch:"=HYPERLINK",currency:"INR",amount:"1.0"}]},"CSV")).toThrow();
  });
 
 });

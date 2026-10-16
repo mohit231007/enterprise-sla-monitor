@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { beforeAll, afterAll, describe, expect, it } from "vitest";
 
 // Each SQL string is copied from one fenced block in the current Branch360
@@ -35,7 +35,7 @@ let enabled=false;
 try {const u=new URL(dsn); enabled=process.env.CI==="true"&&["localhost","127.0.0.1"].includes(u.hostname)&&u.port==="5432"&&u.pathname==="/branch360";}catch{}
 const db=new PrismaClient();
 const A="11111111-1111-4111-8111-111111111111",B="22222222-2222-4222-8222-222222222222";
-async function scoped<T>(fn:(tx:any)=>Promise<T>):Promise<T>{
+async function scoped<T>(fn:(tx:Prisma.TransactionClient)=>Promise<T>):Promise<T>{
  return db.$transaction(async tx=>{
   await tx.$queryRawUnsafe("SELECT set_config('search_path','textbook_pg_ci,public',true)");
   return fn(tx);

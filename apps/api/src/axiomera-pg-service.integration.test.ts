@@ -1,4 +1,9 @@
 import { randomBytes, generateKeyPairSync, sign } from "node:crypto";
+import { mkdtemp, rm, readFile, writeFile, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { LocalImmutableObjectStore, makeObjectKey } from "./axiomera-object-store.js";
+import { fetchObjectExport, processOneObjectExport } from "./axiomera-pg-object-exports.js";
 import { createPgPilotHttp } from "./axiomera-pg-http.js";
 import { queueExport, claimExport, completeExport, processOneExport, fetchExport, renderExport } from "./axiomera-pg-export.js";
 import { PrismaClient } from "@prisma/client";
@@ -28,7 +33,7 @@ describe.runIf(enabled)("Axiomera restricted-role PostgreSQL application service
     "CREATE TABLE axiomera_service_ci.runs (tenant_id uuid NOT NULL,id uuid NOT NULL,dataset text NOT NULL,idem text NOT NULL,digest char(64) NOT NULL,received int NOT NULL,PRIMARY KEY(tenant_id,id),UNIQUE(tenant_id,dataset,idem))",
     "CREATE TABLE axiomera_service_ci.facts (tenant_id uuid NOT NULL,id bigint GENERATED ALWAYS AS IDENTITY,run_id uuid NOT NULL,dataset text NOT NULL,branch text NOT NULL,date date NOT NULL,amount numeric(20,4) NOT NULL,currency char(3) NOT NULL,source text NOT NULL,accepted_at timestamptz NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(tenant_id,id),UNIQUE(tenant_id,dataset,source),FOREIGN KEY(tenant_id,run_id) REFERENCES axiomera_service_ci.runs(tenant_id,id),FOREIGN KEY(tenant_id,branch) REFERENCES axiomera_service_ci.branches(tenant_id,branch))",
     "CREATE TABLE axiomera_service_ci.reports (tenant_id uuid NOT NULL,id uuid NOT NULL,maker text NOT NULL,checker text,status text NOT NULL,payload jsonb NOT NULL,digest char(64) NOT NULL,PRIMARY KEY(tenant_id,id), CHECK(checker IS NULL OR checker<>maker))",
-    "CREATE TABLE axiomera_service_ci.export_jobs (tenant_id uuid NOT NULL,id uuid NOT NULL,report_id uuid NOT NULL,requester text NOT NULL,idem text NOT NULL,format text NOT NULL CHECK(format IN ('CSV','JSON')),state text NOT NULL DEFAULT 'QUEUED' CHECK(state IN ('QUEUED','LEASED','DONE','FAILED')),attempts int NOT NULL DEFAULT 0,generation int NOT NULL DEFAULT 0,lease_owner text,lease_until timestamptz,artifact bytea,artifact_sha256 char(64),artifact_length int,created_at timestamptz NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(tenant_id,id),FOREIGN KEY(tenant_id,report_id) REFERENCES axiomera_service_ci.reports(tenant_id,id),UNIQUE(tenant_id,requester,idem))",
+    "CREATE TABLE axiomera_service_ci.export_jobs (tenant_id uuid NOT NULL,id uuid NOT NULL,report_id uuid NOT NULL,requester text NOT NULL,idem text NOT NULL,format text NOT NULL CHECK(format IN ('CSV','JSON')),state text NOT NULL DEFAULT 'QUEUED' CHECK(state IN ('QUEUED','LEASED','DONE','FAILED')),attempts int NOT NULL DEFAULT 0,generation int NOT NULL DEFAULT 0,lease_owner text,lease_until timestamptz,artifact bytea,object_key text,artifact_sha256 char(64),artifact_length int,created_at timestamptz NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(tenant_id,id),FOREIGN KEY(tenant_id,report_id) REFERENCES axiomera_service_ci.reports(tenant_id,id),UNIQUE(tenant_id,requester,idem))",
     "CREATE TABLE axiomera_service_ci.events (tenant_id uuid NOT NULL, id bigint GENERATED ALWAYS AS IDENTITY,actor text NOT NULL,operation text NOT NULL,subject_id text NOT NULL,PRIMARY KEY(tenant_id,id))"
    ];
    for(const stmt of ddl)await admin.$executeRawUnsafe(stmt);
@@ -44,7 +49,7 @@ describe.runIf(enabled)("Axiomera restricted-role PostgreSQL application service
    for(const table of ["runs","facts","reports","export_jobs","events"])
      await admin.$executeRawUnsafe("GRANT INSERT ON axiomera_service_ci."+table+" TO axiomera_service_runtime");
    await admin.$executeRawUnsafe("GRANT UPDATE(status,checker) ON axiomera_service_ci.reports TO axiomera_service_runtime");
-   await admin.$executeRawUnsafe("GRANT UPDATE(state,attempts,generation,lease_owner,lease_until,artifact,artifact_sha256,artifact_length) ON axiomera_service_ci.export_jobs TO axiomera_service_runtime");
+   await admin.$executeRawUnsafe("GRANT UPDATE(state,attempts,generation,lease_owner,lease_until,artifact,object_key,artifact_sha256,artifact_length) ON axiomera_service_ci.export_jobs TO axiomera_service_runtime");
    await admin.$executeRawUnsafe("GRANT USAGE ON ALL SEQUENCES IN SCHEMA axiomera_service_ci TO axiomera_service_runtime");
    await admin.$executeRawUnsafe("INSERT INTO axiomera_service_ci.branches VALUES ('"+A+"','CENTRAL'),('"+B+"','CENTRAL')");
    await admin.$executeRawUnsafe("INSERT INTO axiomera_service_ci.memberships VALUES "+
@@ -281,6 +286,47 @@ describe.runIf(enabled)("Axiomera restricted-role PostgreSQL application service
       "SELECT state,attempts FROM axiomera_service_ci.export_jobs WHERE tenant_id=$1::uuid AND id=$2::uuid",A,job.id));
    expect(final).toEqual([{state:"FAILED",attempts:3}]);
    await expect(fetchExport(db(),p(A,"aud"),job.id)).rejects.toBeInstanceOf(Denied);
+ });
+
+
+ it("publishes an immutable object outside PostgreSQL and validates access, integrity, and revocation",async()=>{
+   const dir=await mkdtemp(join(tmpdir(),"axiomera-ci-object-"));
+   const store=new LocalImmutableObjectStore(dir);
+   try{
+     const enqueued=await queueExport(db(),p(A,"aud"),reportId,"object-export-idem-001","CSV");
+     const completed=await processOneObjectExport(db(),p(A,"worker"),"worker-object-1",store);
+     expect(completed?.id).toBe(enqueued.id);
+     const info=await withTenant(db(),p(A,"aud"),tx=>tx.$queryRawUnsafe<
+       {object_key:string;artifact:Uint8Array|null}[]>(
+       "SELECT object_key,artifact FROM axiomera_service_ci.export_jobs WHERE tenant_id=$1::uuid AND id=$2::uuid",A,enqueued.id));
+     expect(info).toHaveLength(1);
+     expect(info[0].artifact).toBeNull(); // no export bytes in database
+     const loaded=await fetchObjectExport(db(),p(A,"aud"),enqueued.id,store);
+     expect(loaded.body.toString("utf8")).toContain('"CENTRAL","INR"');
+     expect(loaded.sha256).toHaveLength(64);
+     await store.putImmutable(info[0].object_key,loaded.body);
+     await expect(fetchObjectExport(db(),p(B,"aud"),enqueued.id,store)).rejects.toBeInstanceOf(Denied);
+     await admin.$executeRawUnsafe("UPDATE axiomera_service_ci.memberships SET status='REVOKED' WHERE tenant_id=$1::uuid AND subject='aud'",A);
+     await expect(fetchObjectExport(db(),p(A,"aud"),enqueued.id,store)).rejects.toBeInstanceOf(Denied);
+     await admin.$executeRawUnsafe("UPDATE axiomera_service_ci.memberships SET status='ACTIVE' WHERE tenant_id=$1::uuid AND subject='aud'",A);
+     await writeFile(join(dir,info[0].object_key),Buffer.alloc(loaded.body.length,65));
+     await expect(fetchObjectExport(db(),p(A,"aud"),enqueued.id,store)).rejects.toBeInstanceOf(Conflict);
+   }finally{await rm(dir,{recursive:true,force:true});}
+ });
+ it("rejects path traversal, content mismatch and symlink substitution in local immutable store",async()=>{
+   const dir=await mkdtemp(join(tmpdir(),"axiomera-ci-isolation-"));
+   const store=new LocalImmutableObjectStore(dir);
+   try{
+     const bytes=Buffer.from("immutable proof","utf8");
+     const key=makeObjectKey(A,"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",bytes);
+     await store.putImmutable(key,bytes);
+     await expect(store.putImmutable(key,Buffer.from("altered"))).rejects.toThrow();
+     await expect(store.read("../../secret")).rejects.toThrow();
+     await expect(store.read(key.replace(A,B))).rejects.toThrow();
+     const linkKey=makeObjectKey(A,"cccccccc-cccc-4ccc-8ccc-cccccccccccc",bytes);
+     await symlink(join(dir,key),join(dir,linkKey));
+     await expect(store.read(linkKey)).rejects.toThrow();
+   }finally{await rm(dir,{recursive:true,force:true});}
  });
 
 });

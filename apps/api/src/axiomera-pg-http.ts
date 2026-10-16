@@ -2,6 +2,7 @@ import express from "express";
 import { createPublicKey, verify as verifySignature } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { approve, Conflict, Denied, freeze, ingest, readReleased, type Principal } from "./axiomera-pg-service.js";
+import { fetchExport, queueExport } from "./axiomera-pg-export.js";
 
 /** Non-production, isolated HTTP adapter. Never mount into the legacy public server by default.
  * A bank IAM team must replace this pinned-key pilot with approved OIDC rotation/revocation.
@@ -71,5 +72,30 @@ export function createPgPilotHttp(db:PrismaClient,trust:Trust){
  },201));
  app.post("/v1/tenants/:tenant/reports/:id/approve",handle(async(req,p)=>{if(typeof req.params.id!=="string")throw new Denied();return approve(db,p,req.params.id);}));
  app.get("/v1/tenants/:tenant/reports/:id",handle(async(req,p)=>{if(typeof req.params.id!=="string")throw new Denied();return readReleased(db,p,req.params.id);}));
+
+ app.post("/v1/tenants/:tenant/reports/:id/exports",handle(async(req,p)=>{
+   if(typeof req.params.id!=="string"||!req.body||!["CSV","JSON"].includes(req.body.format))throw new Denied();
+   return queueExport(db,p,req.params.id,req.header("idempotency-key")||"",req.body.format);
+ },202));
+ app.get("/v1/tenants/:tenant/exports/:id/download",async(req,res)=>{
+   let principal:Principal;
+   try {
+     if(typeof req.params.tenant!=="string")throw new Error("tenant");
+     principal=authenticate(req.header("authorization"),req.params.tenant,trust);
+   }catch{res.status(401).json({error:"invalid token or tenant claim"});return;}
+   try{
+     if(typeof req.params.id!=="string")throw new Denied();
+     const artifact=await fetchExport(db,principal,req.params.id);
+     res.setHeader("Cache-Control","private, no-store");
+     res.setHeader("X-Content-Type-Options","nosniff");
+     res.setHeader("X-Artifact-SHA256",artifact.sha256);
+     res.type(artifact.mime).status(200).send(artifact.body);
+   }catch(e){
+     if(e instanceof Denied){res.status(404).json({error:"not found"});return;}
+     if(e instanceof Conflict){res.status(409).json({error:"conflict"});return;}
+     res.status(500).json({error:"internal server error"});
+   }
+ });
+
  return app;
 }

@@ -152,9 +152,11 @@ describe.runIf(active)("verbatim manuscript PostgreSQL blocks: scope, time, inde
  });
  it("CODE-007: exact DDL enforces tenant-and-endpoint idempotency uniqueness",async()=>{
   await scoped(tx=>tx.$executeRawUnsafe(blocks["CODE-007"].sql.split(";")[0]));
-  await scoped(tx=>tx.$executeRawUnsafe("INSERT INTO request_idempotency(tenant_id,endpoint_key,idempotency_key,request_sha256) VALUES ($1::uuid,'upload','key','a')",A));
-  await expect(scoped(tx=>tx.$executeRawUnsafe("INSERT INTO request_idempotency(tenant_id,endpoint_key,idempotency_key,request_sha256) VALUES ($1::uuid,'upload','key','b')",A))).rejects.toThrow();
-  await scoped(tx=>tx.$executeRawUnsafe("INSERT INTO request_idempotency(tenant_id,endpoint_key,idempotency_key,request_sha256) VALUES ($1::uuid,'upload','key','a')",B));
+  const exists=await scoped(tx=>tx.$queryRawUnsafe<{present:string|null}[]>("SELECT to_regclass('textbook_v23_ci.request_idempotency')::text AS present"));
+  expect(exists[0].present).toContain("request_idempotency");
+  await scoped(tx=>tx.$executeRawUnsafe("INSERT INTO textbook_v23_ci.request_idempotency(tenant_id,endpoint_key,idempotency_key,request_sha256) VALUES ($1::uuid,'upload','key','a')",A));
+  await expect(scoped(tx=>tx.$executeRawUnsafe("INSERT INTO textbook_v23_ci.request_idempotency(tenant_id,endpoint_key,idempotency_key,request_sha256) VALUES ($1::uuid,'upload','key','b')",A))).rejects.toThrow();
+  await scoped(tx=>tx.$executeRawUnsafe("INSERT INTO textbook_v23_ci.request_idempotency(tenant_id,endpoint_key,idempotency_key,request_sha256) VALUES ($1::uuid,'upload','key','a')",B));
  });
  it("CODE-008: exact EXPLAIN ANALYZE BUFFERS and btree index creation",async()=>{
   const [plan,index]=blocks["CODE-008"].sql.split(";\n");

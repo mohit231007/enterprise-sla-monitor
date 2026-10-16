@@ -304,6 +304,26 @@ describe.runIf(enabled)("Axiomera restricted-role PostgreSQL application service
      const loaded=await fetchObjectExport(db(),p(A,"aud"),enqueued.id,store);
      expect(loaded.body.toString("utf8")).toContain('"CENTRAL","INR"');
      expect(loaded.sha256).toHaveLength(64);
+     const {privateKey,publicKey}=generateKeyPairSync("rsa",{modulusLength:2048});
+     const trust={issuer:"https://synthetic-store-idp.invalid/",audience:"axiomera-storage-ci",
+       jwks:{keys:[{...publicKey.export({format:"jwk"}),kid:"storage-ci",alg:"RS256",use:"sig"}]}};
+     const now=Math.floor(Date.now()/1000);
+     const header=Buffer.from(JSON.stringify({alg:"RS256",kid:"storage-ci"})).toString("base64url");
+     const claims=Buffer.from(JSON.stringify({iss:trust.issuer,aud:trust.audience,sub:"aud",tenant_id:A,iat:now-1,nbf:now-1,exp:now+120})).toString("base64url");
+     const jwt=[header,claims,sign("RSA-SHA256",Buffer.from(header+"."+claims),privateKey).toString("base64url")].join(".");
+     const app=createPgPilotHttp(db(),trust,store);
+     const server=app.listen(0,"127.0.0.1");
+     await new Promise<void>(done=>server.once("listening",done));
+     try{
+       const port=(server.address() as {port:number}).port;
+       const url="http://127.0.0.1:"+port+"/v1/tenants/"+A+"/exports/"+enqueued.id+"/object-download";
+       const response=await fetch(url,{headers:{Authorization:"Bearer "+jwt}});
+       expect(response.status).toBe(200);
+       expect(Buffer.from(await response.arrayBuffer())).toEqual(loaded.body);
+       expect(response.headers.get("x-artifact-sha256")).toBe(loaded.sha256);
+       const missingToken=await fetch(url);
+       expect(missingToken.status).toBe(401);
+     }finally{await new Promise<void>((resolve,reject)=>server.close(e=>e?reject(e):resolve()));}
      await store.putImmutable(info[0].object_key,loaded.body);
      await expect(fetchObjectExport(db(),p(B,"aud"),enqueued.id,store)).rejects.toBeInstanceOf(Denied);
      await admin.$executeRawUnsafe("UPDATE axiomera_service_ci.memberships SET status='REVOKED' WHERE tenant_id=$1::uuid AND subject='aud'",A);

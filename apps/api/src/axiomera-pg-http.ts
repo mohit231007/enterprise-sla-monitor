@@ -67,7 +67,7 @@ export function createPgPilotHttp(db:PrismaClient,trust:Trust){
  },201));
  app.post("/v1/tenants/:tenant/reports",handle(async(req,p)=>{
    if(!req.body||typeof req.body.dataset!=="string")throw new Denied();
-   return freeze(db,p,req.body.dataset);
+   return freeze(db,p,req.body.dataset,typeof req.body.cutoff==="string"?req.body.cutoff:undefined);
  },201));
  app.post("/v1/tenants/:tenant/reports/:id/approve",handle(async(req,p)=>{if(typeof req.params.id!=="string")throw new Denied();return approve(db,p,req.params.id);}));
  app.get("/v1/tenants/:tenant/reports/:id",handle(async(req,p)=>{if(typeof req.params.id!=="string")throw new Denied();return readReleased(db,p,req.params.id);}));

@@ -72,6 +72,12 @@ export async function claimExport(db:PrismaClient,p:Principal,workerId:string){
  if(!workerPattern.test(workerId))throw new Denied("invalid worker");
  return withTenant(db,p,async tx=>{
    await authorize(tx,p,["WORKER"]);
+   // Exhausted expired leases are terminal, not silently stranded.
+   const exhausted=await tx.$queryRawUnsafe<{id:string}[]>(
+     "UPDATE axiomera_service_ci.export_jobs SET state='FAILED',lease_owner=NULL,lease_until=NULL "+
+     "WHERE tenant_id=$1::uuid AND state='LEASED' AND attempts>=3 "+
+     "AND lease_until<clock_timestamp() RETURNING id",p.tenantId);
+   for(const row of exhausted)await event(tx,p,"export.failed",row.id);
    const candidate=await tx.$queryRawUnsafe<{id:string}[]>(
      "SELECT id FROM axiomera_service_ci.export_jobs WHERE tenant_id=$1::uuid "+
      "AND ((state='QUEUED') OR (state='LEASED' AND lease_until<clock_timestamp())) "+

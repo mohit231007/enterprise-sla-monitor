@@ -1,4 +1,5 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, generateKeyPairSync, sign } from "node:crypto";
+import { createPgPilotHttp } from "./axiomera-pg-http.js";
 import { PrismaClient } from "@prisma/client";
 import { beforeAll, afterAll, describe, expect, it } from "vitest";
 import { withTenant,ingest,freeze,approve,readReleased,Denied,Conflict } from "./axiomera-pg-service.js";
@@ -114,4 +115,58 @@ describe.runIf(enabled)("Axiomera restricted-role PostgreSQL application service
    rows.forEach((value,i)=>expect(value).toEqual([{tenant_id:ids[i]}]));
    expect(await db().$queryRawUnsafe("SELECT * FROM axiomera_service_ci.reports")).toEqual([]);
  });
+
+ it("serves an actual signed-JWT HTTP-to-Postgres ingest, review and report journey",async()=>{
+   const {privateKey,publicKey}=generateKeyPairSync("rsa",{modulusLength:2048});
+   const trust={issuer:"https://synthetic-idp.invalid/",audience:"axiomera-ci",
+     jwks:{keys:[{...publicKey.export({format:"jwk"}),kid:"ci-key",alg:"RS256",use:"sig"}]}};
+   const makeJwt=(tenant:string,subject:string,adjust?:{exp?:number;nbf?:number;kid?:string;alg?:string})=>{
+     const now=Math.floor(Date.now()/1000);
+     const header={alg:adjust?.alg??"RS256",typ:"JWT",kid:adjust?.kid??"ci-key"};
+     const payload={iss:trust.issuer,aud:trust.audience,sub:subject,tenant_id:tenant,
+       iat:now-1,nbf:adjust?.nbf??now-1,exp:adjust?.exp??now+300};
+     const head=Buffer.from(JSON.stringify(header)).toString("base64url");
+     const body=Buffer.from(JSON.stringify(payload)).toString("base64url");
+     const signature=sign("RSA-SHA256",Buffer.from(head+"."+body),privateKey).toString("base64url");
+     return [head,body,signature].join(".");
+   };
+   const app=createPgPilotHttp(db(),trust);
+   const server=app.listen(0,"127.0.0.1");
+   await new Promise<void>(resolve=>server.once("listening",resolve));
+   const port=(server.address() as {port:number}).port;
+   const base="http://127.0.0.1:"+port+"/v1/tenants/";
+   const call=async (method:string,tenant:string,part:string,token?:string,data?:unknown,idem?:string)=>{
+     const h:Record<string,string>={"Content-Type":"application/json"};
+     if(token)h.Authorization="Bearer "+token;
+     if(idem)h["Idempotency-Key"]=idem;
+     const res=await fetch(base+tenant+part,{method,headers:h,body:data===undefined?undefined:JSON.stringify(data)});
+     return {status:res.status,body:await res.json() as any};
+   };
+   try{
+     const uploader=makeJwt(A,"alice"),analyst=makeJwt(A,"bob"),reviewer=makeJwt(A,"carol"),auditor=makeJwt(A,"aud");
+     const upload=await call("POST",A,"/ingestions",uploader,{dataset:"sales",rows:[
+       {branch:"CENTRAL",date:"2026-10-15",amount:"0.1000",currency:"INR",source:"SRC:RED:HTTP001"}]},"http-idem-1234");
+     expect(upload.status).toBe(201);
+     const draft=await call("POST",A,"/reports",analyst,{dataset:"sales"});
+     expect(draft.status).toBe(201);
+     expect(draft.body.payload.lines).toEqual([{branch:"CENTRAL",currency:"INR",amount:"10.3000"}]);
+     expect((await call("GET",A,"/reports/"+draft.body.id,auditor)).status).toBe(404);
+     expect((await call("POST",A,"/reports/"+draft.body.id+"/approve",analyst)).status).toBe(404);
+     expect((await call("POST",A,"/reports/"+draft.body.id+"/approve",reviewer)).status).toBe(200);
+     const released=await call("GET",A,"/reports/"+draft.body.id,auditor);
+     expect(released.status).toBe(200);expect(released.body.payload.lines).toEqual(draft.body.payload.lines);
+     expect((await call("GET",B,"/reports/"+draft.body.id,auditor)).status).toBe(401);
+     expect((await call("GET",B,"/reports/"+draft.body.id,makeJwt(B,"aud"))).status).toBe(404);
+     expect((await call("GET",A,"/reports/"+draft.body.id,makeJwt(A,"revoked"))).status).toBe(404);
+     expect((await call("GET",A,"/reports/"+draft.body.id)).status).toBe(401);
+     expect((await call("GET",A,"/reports/"+draft.body.id,makeJwt(A,"aud",{exp:1}))).status).toBe(401);
+     expect((await call("GET",A,"/reports/"+draft.body.id,makeJwt(A,"aud",{nbf:Math.floor(Date.now()/1000)+1000}))).status).toBe(401);
+     expect((await call("GET",A,"/reports/"+draft.body.id,makeJwt(A,"aud",{kid:"unknown"}))).status).toBe(401);
+     const tampered=auditor.slice(0,-1)+(auditor.endsWith("A")?"B":"A");
+     expect((await call("GET",A,"/reports/"+draft.body.id,tampered)).status).toBe(401);
+   } finally {
+     await new Promise<void>((resolve,reject)=>server.close(e=>e?reject(e):resolve()));
+   }
+ });
+
 });

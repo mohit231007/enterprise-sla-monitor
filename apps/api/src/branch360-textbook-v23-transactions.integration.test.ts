@@ -172,12 +172,12 @@ describe.runIf(active)("native PostgreSQL transactional, RLS and fencing manuscr
   const parts=b["CODE-056"].sql.split(";\n");
   await scoped(admin,async tx=>{
     await tx.$executeRawUnsafe(parts[1],A,"K1","digest");
-    await tx.$executeRawUnsafe(parts[2],A,"event-1","{}");
+    await tx.$executeRawUnsafe(parts[2],A,"K1","digest","event-1","{}");
   });
   expect(await scoped(admin,tx=>tx.$queryRawUnsafe<{kind:string}[]>("SELECT kind FROM domain_outbox"))).toEqual([{kind:"source-revisions-committed"}]);
   await expect(scoped(admin,async tx=>{
     await tx.$executeRawUnsafe(parts[1],A,"K1","other");
-    await tx.$executeRawUnsafe(parts[2],A,"event-2","{}");
+    await tx.$executeRawUnsafe(parts[2],A,"K1","other","event-2","{}");
   })).rejects.toThrow();
   expect(await scoped(admin,tx=>tx.$queryRawUnsafe<{event_id:string}[]>("SELECT event_id FROM domain_outbox"))).toEqual([{event_id:"event-1"}]);
  });

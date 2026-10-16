@@ -191,20 +191,17 @@ describe.runIf(active)("native PostgreSQL transactional, RLS and fencing manuscr
  it("CODE-025: two serializable readers cannot safely deactivate last two approvers",async()=>{
   let arrived=0,release!:()=>void;
   const barrier=new Promise<void>(resolve=>{release=resolve});
-  async function one(identity:string){
-    return scoped(admin,tx=>tx.$transaction?Promise.resolve(0):Promise.resolve(0));
-  }
   const txOne=admin.$transaction(async tx=>{
-    await tx.$queryRawUnsafe("SELECT set_config('search_path','textbook_v23_tx,public',true)");
     await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+    await tx.$queryRawUnsafe("SELECT set_config('search_path','textbook_v23_tx,public',true)");
     const r=await tx.$queryRawUnsafe<{count:bigint}[]>(b["CODE-025"].sql.split(";\n")[1],A);
     expect(Number(r[0].count)).toBe(2);
     arrived++;if(arrived===2)release();await barrier;
     await tx.$executeRawUnsafe(b["CODE-025"].sql.split(";\n")[2],A,"m1");
   });
   const txTwo=admin.$transaction(async tx=>{
-    await tx.$queryRawUnsafe("SELECT set_config('search_path','textbook_v23_tx,public',true)");
     await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+    await tx.$queryRawUnsafe("SELECT set_config('search_path','textbook_v23_tx,public',true)");
     const r=await tx.$queryRawUnsafe<{count:bigint}[]>(b["CODE-025"].sql.split(";\n")[1],A);
     expect(Number(r[0].count)).toBe(2);
     arrived++;if(arrived===2)release();await barrier;

@@ -40,10 +40,18 @@ async function event(tx:Tx,p:Principal,op:string,id:string) {
 export async function ingest(db:PrismaClient,p:Principal,dataset:string,rows:Fact[],idem:string) {
   if(!/^[a-z][a-z0-9_]{1,39}$/.test(dataset)||!/^[A-Za-z0-9._:-]{8,120}$/.test(idem)||
      rows.length<1||rows.length>1000)throw new Denied("invalid ingest contract");
-  for(const r of rows) if(!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(r.branch)||
-    !/^\d{4}-\d{2}-\d{2}$/.test(r.date)||!money.test(r.amount)||
-    !["INR","USD","GBP","EUR"].includes(r.currency)||
-    !/^[A-Za-z0-9][A-Za-z0-9_.:-]{2,119}$/.test(r.source))throw new Denied("invalid fact");
+  const logical=new Set<string>();
+  for(const r of rows){
+    const day=new Date(r.date+"T00:00:00.000Z");
+    if(!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(r.branch)||
+      !/^\d{4}-\d{2}-\d{2}$/.test(r.date)||!Number.isFinite(day.valueOf())||
+      day.toISOString().slice(0,10)!==r.date||!money.test(r.amount)||
+      !["INR","USD","GBP","EUR"].includes(r.currency)||
+      !/^[A-Za-z0-9][A-Za-z0-9_.:-]{2,119}$/.test(r.source))throw new Denied("invalid fact");
+    const key=r.branch+"|"+r.date+"|"+r.currency;
+    if(logical.has(key))throw new Denied("duplicate logical key within batch");
+    logical.add(key);
+  }
   return withTenant(db,p,async tx=>{
     await authorize(tx,p,["OWNER","INGESTOR"]);
     await tx.$queryRawUnsafe("SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended($1,0))",
@@ -67,14 +75,22 @@ export async function ingest(db:PrismaClient,p:Principal,dataset:string,rows:Fac
     return {id,replayed:false,received:rows.length};
   });
 }
-export async function freeze(db:PrismaClient,p:Principal,dataset:string) {
+export async function freeze(db:PrismaClient,p:Principal,dataset:string,asOf?:string) {
   if(!/^[a-z][a-z0-9_]{1,39}$/.test(dataset))throw new Denied();
+  const cutoff=asOf??new Date().toISOString();
+  if(!/(?:Z|[+-]\d{2}:\d{2})$/.test(cutoff)||!Number.isFinite(Date.parse(cutoff)))throw new Denied("offset-qualified cutoff required");
   return withTenant(db,p,async tx=>{
     await authorize(tx,p,["OWNER","ANALYST"]);
     const rows=await tx.$queryRawUnsafe<{branch:string;currency:string;amount:string}[]>(
-      "SELECT branch,currency,SUM(amount)::text AS amount FROM axiomera_service_ci.facts WHERE tenant_id=$1::uuid AND dataset=$2 GROUP BY branch,currency ORDER BY branch,currency",
-      p.tenantId,dataset);
-    const payload={tenant:p.tenantId,dataset,lines:rows,metric:"revenue_sum.v1"};
+      "WITH ranked AS (SELECT branch,currency,date,amount,ROW_NUMBER() OVER "+
+      "(PARTITION BY tenant_id,dataset,branch,date,currency ORDER BY accepted_at DESC,id DESC) rn "+
+      "FROM axiomera_service_ci.facts WHERE tenant_id=$1::uuid AND dataset=$2 "+
+      "AND accepted_at<=$3::timestamptz) "+
+      "SELECT branch,currency,SUM(amount)::text AS amount FROM ranked WHERE rn=1 "+
+      "GROUP BY branch,currency ORDER BY branch,currency",
+      p.tenantId,dataset,cutoff);
+    const payload={tenant:p.tenantId,dataset,cutoff:new Date(cutoff).toISOString(),
+      lines:rows,metric:"revenue_sum.v1"};
     const id=randomUUID(),digest=hash(payload);
     await tx.$executeRawUnsafe(
       "INSERT INTO axiomera_service_ci.reports(tenant_id,id,maker,status,payload,digest) VALUES($1::uuid,$2::uuid,$3,'DRAFT',$4::jsonb,$5)",

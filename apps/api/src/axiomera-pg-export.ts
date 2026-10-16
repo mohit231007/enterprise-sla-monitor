@@ -139,17 +139,18 @@ export async function fetchExport(db:PrismaClient,p:Principal,id:string){
      "FROM axiomera_service_ci.export_jobs WHERE tenant_id=$1::uuid AND id=$2::uuid",
      p.tenantId,id);
    const job=jobs[0];
-   if(!job||job.state!=="DONE"||!job.artifact||!job.artifact_sha256||
-       job.artifact.length!==job.artifact_length)throw new Denied("export not available");
+   if(!job||job.state!=="DONE"||!job.artifact||!job.artifact_sha256)throw new Denied("export not available");
+   const bytes=Buffer.from(job.artifact);
+   if(bytes.length!==job.artifact_length)throw new Denied("export not available");
    // Download-time re-authorization of report and digest (including after revocation).
    const report=await tx.$queryRawUnsafe<ReportRow[]>(
      "SELECT status,payload,digest FROM axiomera_service_ci.reports WHERE tenant_id=$1::uuid AND id=$2::uuid",
      p.tenantId,job.report_id);
    validatedReport(report[0]);
-   if(digest(job.artifact)!==job.artifact_sha256||
-     !renderExport(report[0].payload,job.format as "CSV"|"JSON").equals(job.artifact))
+   if(digest(bytes)!==job.artifact_sha256||
+     !renderExport(report[0].payload,job.format as "CSV"|"JSON").equals(bytes))
      throw new Conflict("artifact verification failed");
-   return {body:job.artifact,mime:job.format==="CSV"?"text/csv; charset=utf-8":"application/json",
+   return {body:bytes,mime:job.format==="CSV"?"text/csv; charset=utf-8":"application/json",
      sha256:job.artifact_sha256};
  });
 }
